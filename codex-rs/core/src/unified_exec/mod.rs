@@ -198,7 +198,8 @@ impl UnifiedExecSessionManager {
         } else {
             let command = request.input_chunks.to_vec();
             let new_id = self.next_session_id.fetch_add(1, Ordering::SeqCst);
-            let (session, initial_output_rx) = create_unified_exec_session(&command, request.cwd).await?;
+            let (session, initial_output_rx) =
+                create_unified_exec_session(&command, request.cwd).await?;
             let managed_session = ManagedUnifiedExecSession::new(session, initial_output_rx);
             let (buffer, notify) = managed_session.output_handles();
             writer_tx = managed_session.writer_sender();

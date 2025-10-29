@@ -1,5 +1,7 @@
 pub mod apply_patch;
+mod edit;
 mod grep_files;
+mod legacy_edit;
 mod list_dir;
 mod mcp;
 mod mcp_resource;
@@ -13,6 +15,7 @@ mod view_image;
 pub use plan::PLAN_TOOL;
 
 pub use apply_patch::ApplyPatchHandler;
+pub use edit::EditHandler;
 pub use grep_files::GrepFilesHandler;
 pub use list_dir::ListDirHandler;
 pub use mcp::McpHandler;

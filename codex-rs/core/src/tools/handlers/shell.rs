@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use codex_protocol::models::ShellToolCallParams;
 use std::sync::Arc;
 
+use super::legacy_edit;
 use crate::apply_patch;
 use crate::apply_patch::InternalApplyPatchInvocation;
 use crate::apply_patch::convert_apply_patch_to_protocol;
@@ -22,6 +23,7 @@ use crate::tools::runtimes::apply_patch::ApplyPatchRuntime;
 use crate::tools::runtimes::shell::ShellRequest;
 use crate::tools::runtimes::shell::ShellRuntime;
 use crate::tools::sandboxing::ToolCtx;
+use codex_apply_patch::ApplyPatchAction;
 
 pub struct ShellHandler;
 
@@ -131,63 +133,16 @@ impl ShellHandler {
             &exec_params.cwd,
         ) {
             codex_apply_patch::MaybeApplyPatchVerified::Body(changes) => {
-                match apply_patch::apply_patch(session.as_ref(), turn.as_ref(), &call_id, changes)
-                    .await
-                {
-                    InternalApplyPatchInvocation::Output(item) => {
-                        // Programmatic apply_patch path; return its result.
-                        let content = item?;
-                        return Ok(ToolOutput::Function {
-                            content,
-                            content_items: None,
-                            success: Some(true),
-                        });
-                    }
-                    InternalApplyPatchInvocation::DelegateToExec(apply) => {
-                        let emitter = ToolEmitter::apply_patch(
-                            convert_apply_patch_to_protocol(&apply.action),
-                            !apply.user_explicitly_approved_this_action,
-                        );
-                        let event_ctx = ToolEventCtx::new(
-                            session.as_ref(),
-                            turn.as_ref(),
-                            &call_id,
-                            Some(&tracker),
-                        );
-                        emitter.begin(event_ctx).await;
-
-                        let req = ApplyPatchRequest {
-                            patch: apply.action.patch.clone(),
-                            cwd: apply.action.cwd.clone(),
-                            timeout_ms: exec_params.timeout_ms,
-                            user_explicitly_approved: apply.user_explicitly_approved_this_action,
-                            codex_exe: turn.codex_linux_sandbox_exe.clone(),
-                        };
-                        let mut orchestrator = ToolOrchestrator::new();
-                        let mut runtime = ApplyPatchRuntime::new();
-                        let tool_ctx = ToolCtx {
-                            session: session.as_ref(),
-                            turn: turn.as_ref(),
-                            call_id: call_id.clone(),
-                            tool_name: tool_name.to_string(),
-                        };
-                        let out = orchestrator
-                            .run(&mut runtime, &req, &tool_ctx, &turn, turn.approval_policy)
-                            .await;
-                        let event_ctx = ToolEventCtx::new(
-                            session.as_ref(),
-                            turn.as_ref(),
-                            &call_id,
-                            Some(&tracker),
-                        );
-                        let content = emitter.finish(event_ctx, out).await?;
-                        return Ok(ToolOutput::Function {
-                            content,
-                            content_items: None,
-                            success: Some(true),
-                        });
-                    }
-                }
+                return Self::execute_apply_patch_action(
+                    tool_name,
+                    changes,
+                    exec_params.timeout_ms,
+                    &session,
+                    &turn,
+                    &tracker,
+                    &call_id,
+                )
+                .await;
             }
             codex_apply_patch::MaybeApplyPatchVerified::CorrectnessError(parse_error) => {
                 return Err(FunctionCallError::RespondToModel(format!(
@@ -200,6 +155,25 @@ impl ShellHandler {
             }
             codex_apply_patch::MaybeApplyPatchVerified::NotApplyPatch => {
                 // Fall through to regular shell execution.
+            }
+        }
+
+        match legacy_edit::maybe_build_apply_patch_action(&exec_params.command, &exec_params.cwd) {
+            Ok(Some(action)) => {
+                return Self::execute_apply_patch_action(
+                    tool_name,
+                    action,
+                    exec_params.timeout_ms,
+                    &session,
+                    &turn,
+                    &tracker,
+                    &call_id,
+                )
+                .await;
+            }
+            Ok(None) => { /* proceed with shell */ }
+            Err(err) => {
+                return Err(FunctionCallError::RespondToModel(err.to_string()));
             }
         }
 
@@ -238,5 +212,62 @@ impl ShellHandler {
             content_items: None,
             success: Some(true),
         })
+    }
+
+    async fn execute_apply_patch_action(
+        tool_name: &str,
+        action: ApplyPatchAction,
+        timeout_ms: Option<u64>,
+        session: &Arc<crate::codex::Session>,
+        turn: &Arc<TurnContext>,
+        tracker: &crate::tools::context::SharedTurnDiffTracker,
+        call_id: &str,
+    ) -> Result<ToolOutput, FunctionCallError> {
+        match apply_patch::apply_patch(session.as_ref(), turn.as_ref(), call_id, action).await {
+            InternalApplyPatchInvocation::Output(item) => {
+                let content = item?;
+                Ok(ToolOutput::Function {
+                    content,
+                    content_items: None,
+                    success: Some(true),
+                })
+            }
+            InternalApplyPatchInvocation::DelegateToExec(apply) => {
+                let emitter = ToolEmitter::apply_patch(
+                    convert_apply_patch_to_protocol(&apply.action),
+                    !apply.user_explicitly_approved_this_action,
+                );
+                let event_ctx =
+                    ToolEventCtx::new(session.as_ref(), turn.as_ref(), call_id, Some(tracker));
+                emitter.begin(event_ctx).await;
+
+                let req = ApplyPatchRequest {
+                    patch: apply.action.patch.clone(),
+                    cwd: apply.action.cwd.clone(),
+                    timeout_ms,
+                    user_explicitly_approved: apply.user_explicitly_approved_this_action,
+                    codex_exe: turn.codex_linux_sandbox_exe.clone(),
+                };
+                let mut orchestrator = ToolOrchestrator::new();
+                let mut runtime = ApplyPatchRuntime::new();
+                let tool_ctx = ToolCtx {
+                    session: session.as_ref(),
+                    turn: turn.as_ref(),
+                    call_id: call_id.to_string(),
+                    tool_name: tool_name.to_string(),
+                };
+                let out = orchestrator
+                    .run(&mut runtime, &req, &tool_ctx, turn, turn.approval_policy)
+                    .await;
+                let event_ctx =
+                    ToolEventCtx::new(session.as_ref(), turn.as_ref(), call_id, Some(tracker));
+                let content = emitter.finish(event_ctx, out).await?;
+                Ok(ToolOutput::Function {
+                    content,
+                    content_items: None,
+                    success: Some(true),
+                })
+            }
+        }
     }
 }

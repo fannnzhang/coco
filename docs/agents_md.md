@@ -48,3 +48,12 @@ project_doc_fallback_filenames = ["TEAM_GUIDE.md", ".agents.md"]
 ```
 
 For additional configuration details, see [Config](../docs/config.md) and revisit the [Memory with AGENTS.md guide](../docs/getting-started.md#memory-with-agentsmd) for practical usage tips.
+
+## Explicit Overrides
+
+Prefer to point Codex at a single instructions file? Set
+`experimental_agents_file` in your configuration or profile. When this is set,
+Codex skips the directory walk entirely and loads instructions from the
+specified path (relative paths are resolved against the working directory).
+The [`project_doc_max_bytes`](../docs/config.md#project_doc_max_bytes) limit
+still applies to the override.

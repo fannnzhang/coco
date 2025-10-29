@@ -67,7 +67,7 @@ pub async fn build_chatgpt_headers() -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(
         USER_AGENT,
-        HeaderValue::from_str(&ua).unwrap_or(HeaderValue::from_static("codex-cli")),
+        HeaderValue::from_str(&ua).unwrap_or(HeaderValue::from_static("coco")),
     );
     if let Ok(home) = codex_core::config::find_codex_home() {
         let store_mode = codex_core::config::Config::load_from_base_config_with_overrides(

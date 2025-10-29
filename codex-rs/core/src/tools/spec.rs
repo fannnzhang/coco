@@ -3,6 +3,7 @@ use crate::client_common::tools::ToolSpec;
 use crate::features::Feature;
 use crate::features::Features;
 use crate::model_family::ModelFamily;
+use crate::tools::handlers::EditHandler;
 use crate::tools::handlers::PLAN_TOOL;
 use crate::tools::handlers::apply_patch::ApplyPatchToolType;
 use crate::tools::handlers::apply_patch::create_apply_patch_freeform_tool;
@@ -515,6 +516,121 @@ fn create_read_file_tool() -> ToolSpec {
     })
 }
 
+fn create_write_file_tool() -> ToolSpec {
+    let mut properties = BTreeMap::new();
+    properties.insert(
+        "file_path".to_string(),
+        JsonSchema::String {
+            description: Some(
+                "Absolute path to the file that should be created or overwritten.".to_string(),
+            ),
+        },
+    );
+    properties.insert(
+        "content".to_string(),
+        JsonSchema::String {
+            description: Some("The full contents that should be written to the file.".to_string()),
+        },
+    );
+
+    ToolSpec::Function(ResponsesApiTool {
+        name: "write_file".to_string(),
+        description: "Creates or overwrites a file with the provided content. Use absolute paths."
+            .to_string(),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec!["file_path".to_string(), "content".to_string()]),
+            additional_properties: Some(true.into()),
+        },
+    })
+}
+
+fn create_replace_tool() -> ToolSpec {
+    let mut properties = BTreeMap::new();
+    properties.insert(
+        "file_path".to_string(),
+        JsonSchema::String {
+            description: Some(
+                "Absolute path to the file that contains the text to replace.".to_string(),
+            ),
+        },
+    );
+    properties.insert(
+        "instruction".to_string(),
+        JsonSchema::String {
+            description: Some(
+                "High-level instruction describing the intent of the change. Provide enough context so another engineer could apply it."
+                    .to_string(),
+            ),
+        },
+    );
+    properties.insert(
+        "old_string".to_string(),
+        JsonSchema::String {
+            description: Some(
+                "Exact literal text to replace. Include surrounding context and match whitespace precisely."
+                    .to_string(),
+            ),
+        },
+    );
+    properties.insert(
+        "new_string".to_string(),
+        JsonSchema::String {
+            description: Some(
+                "Exact literal replacement for `old_string`. Ensure the resulting code is complete and idiomatic."
+                    .to_string(),
+            ),
+        },
+    );
+    properties.insert(
+        "expected_replacements".to_string(),
+        JsonSchema::Number {
+            description: Some(
+                "Optional expected number of replacements. Defaults to 1; set explicitly when replacing multiple occurrences."
+                    .to_string(),
+            ),
+        },
+    );
+
+    ToolSpec::Function(ResponsesApiTool {
+        name: "replace".to_string(),
+        description: "Performs a literal search-and-replace within an existing file. Provide the exact text you expect to change.".to_string(),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec![
+                "file_path".to_string(),
+                "old_string".to_string(),
+                "new_string".to_string(),
+            ]),
+            additional_properties: Some(true.into()),
+        },
+    })
+}
+
+fn create_delete_file_tool() -> ToolSpec {
+    let mut properties = BTreeMap::new();
+    properties.insert(
+        "file_path".to_string(),
+        JsonSchema::String {
+            description: Some("Absolute path to the file that should be deleted.".to_string()),
+        },
+    );
+
+    ToolSpec::Function(ResponsesApiTool {
+        name: "delete".to_string(),
+        description: "Deletes an existing file from the workspace. Provide an absolute file path."
+            .to_string(),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec!["file_path".to_string()]),
+            additional_properties: Some(false.into()),
+        },
+    })
+}
+
 fn create_list_dir_tool() -> ToolSpec {
     let mut properties = BTreeMap::new();
     properties.insert(
@@ -885,6 +1001,7 @@ pub(crate) fn build_specs(
     let view_image_handler = Arc::new(ViewImageHandler);
     let mcp_handler = Arc::new(McpHandler);
     let mcp_resource_handler = Arc::new(McpResourceHandler);
+    let edit_handler = Arc::new(EditHandler);
 
     let use_unified_exec = config.experimental_unified_exec_tool
         || matches!(config.shell_type, ConfigShellToolType::Streamable);
@@ -950,6 +1067,30 @@ pub(crate) fn build_specs(
         let read_file_handler = Arc::new(ReadFileHandler);
         builder.push_spec_with_parallel_support(create_read_file_tool(), true);
         builder.register_handler("read_file", read_file_handler);
+    }
+
+    if config
+        .experimental_supported_tools
+        .contains(&"write_file".to_string())
+    {
+        builder.push_spec(create_write_file_tool());
+        builder.register_handler("write_file", edit_handler.clone());
+    }
+
+    if config
+        .experimental_supported_tools
+        .contains(&"replace".to_string())
+    {
+        builder.push_spec(create_replace_tool());
+        builder.register_handler("replace", edit_handler.clone());
+    }
+
+    if config
+        .experimental_supported_tools
+        .contains(&"delete".to_string())
+    {
+        builder.push_spec(create_delete_file_tool());
+        builder.register_handler("delete", edit_handler);
     }
 
     if config
@@ -1254,6 +1395,13 @@ mod tests {
                 .any(|tool| tool_name(&tool.spec) == "grep_files")
         );
         assert!(tools.iter().any(|tool| tool_name(&tool.spec) == "list_dir"));
+        assert!(
+            tools
+                .iter()
+                .any(|tool| tool_name(&tool.spec) == "write_file")
+        );
+        assert!(tools.iter().any(|tool| tool_name(&tool.spec) == "replace"));
+        assert!(tools.iter().any(|tool| tool_name(&tool.spec) == "delete"));
     }
 
     #[test]

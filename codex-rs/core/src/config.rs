@@ -188,6 +188,9 @@ pub struct Config {
     /// Additional filenames to try when looking for project-level docs.
     pub project_doc_fallback_filenames: Vec<String>,
 
+    /// Optional override path for project-level instructions.
+    pub experimental_agents_file: Option<PathBuf>,
+
     /// Directory containing all Codex state (defaults to `~/.codex` but can be
     /// overridden by the `CODEX_HOME` environment variable).
     pub codex_home: PathBuf,
@@ -909,6 +912,9 @@ pub struct ConfigToml {
     /// Ordered list of fallback filenames to look for when AGENTS.md is missing.
     pub project_doc_fallback_filenames: Option<Vec<String>>,
 
+    /// Override path for project-level instructions (experimental).
+    pub experimental_agents_file: Option<PathBuf>,
+
     /// Profile to use from the `profiles` map.
     pub profile: Option<String>,
 
@@ -1372,6 +1378,12 @@ impl Config {
             Self::get_base_instructions(experimental_instructions_path, &resolved_cwd)?;
         let base_instructions = base_instructions.or(file_base_instructions);
 
+        let experimental_agents_path = config_profile
+            .experimental_agents_file
+            .as_ref()
+            .or(cfg.experimental_agents_file.as_ref())
+            .map(|path| Self::resolve_project_doc_override_path(path, &resolved_cwd));
+
         // Default review model when not set in config; allow CLI override to take precedence.
         let review_model = override_review_model
             .or(cfg.review_model)
@@ -1417,6 +1429,7 @@ impl Config {
                     }
                 })
                 .collect(),
+            experimental_agents_file: experimental_agents_path,
             codex_home,
             history,
             file_opener: cfg.file_opener.unwrap_or(UriBasedFileOpener::VsCode),
@@ -1474,6 +1487,14 @@ impl Config {
             },
         };
         Ok(config)
+    }
+
+    fn resolve_project_doc_override_path(path: &PathBuf, cwd: &Path) -> PathBuf {
+        if path.is_absolute() {
+            path.clone()
+        } else {
+            cwd.join(path)
+        }
     }
 
     fn load_instructions(codex_dir: Option<&Path>) -> Option<String> {
@@ -3089,6 +3110,7 @@ model_verbosity = "high"
                 model_providers: fixture.model_provider_map.clone(),
                 project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
                 project_doc_fallback_filenames: Vec::new(),
+                experimental_agents_file: None,
                 codex_home: fixture.codex_home(),
                 history: History::default(),
                 file_opener: UriBasedFileOpener::VsCode,
@@ -3160,6 +3182,7 @@ model_verbosity = "high"
             model_providers: fixture.model_provider_map.clone(),
             project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
             project_doc_fallback_filenames: Vec::new(),
+            experimental_agents_file: None,
             codex_home: fixture.codex_home(),
             history: History::default(),
             file_opener: UriBasedFileOpener::VsCode,
@@ -3246,6 +3269,7 @@ model_verbosity = "high"
             model_providers: fixture.model_provider_map.clone(),
             project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
             project_doc_fallback_filenames: Vec::new(),
+            experimental_agents_file: None,
             codex_home: fixture.codex_home(),
             history: History::default(),
             file_opener: UriBasedFileOpener::VsCode,
@@ -3318,6 +3342,7 @@ model_verbosity = "high"
             model_providers: fixture.model_provider_map.clone(),
             project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
             project_doc_fallback_filenames: Vec::new(),
+            experimental_agents_file: None,
             codex_home: fixture.codex_home(),
             history: History::default(),
             file_opener: UriBasedFileOpener::VsCode,

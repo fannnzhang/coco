@@ -816,6 +816,15 @@ We recommend migrating instructions to AGENTS.md; other filenames may reduce mod
 
 > See also [AGENTS.md discovery](./agents_md.md) for how Codex locates these files during a session.
 
+### experimental_agents_file
+
+By default Codex walks each directory from the repository root to the working
+directory, loading `AGENTS.override.md`, `AGENTS.md`, and any configured
+fallback names. Setting `experimental_agents_file` skips that discovery phase
+and always loads instructions from the provided path instead. Relative paths are
+resolved against the current working directory, and the
+[`project_doc_max_bytes`](#project_doc_max_bytes) limit still applies.
+
 ### tui
 
 Options that are specific to the TUI.
@@ -907,6 +916,7 @@ Valid values:
 | `model_providers.<id>.stream_max_retries`        | number                                                            | SSE stream retry count (default: 5).                                                                                       |
 | `model_providers.<id>.stream_idle_timeout_ms`    | number                                                            | SSE idle timeout (ms) (default: 300000).                                                                                   |
 | `project_doc_max_bytes`                          | number                                                            | Max bytes to read from `AGENTS.md`.                                                                                        |
+| `experimental_agents_file`                      | string (path)                                                     | Replace project doc discovery with the specified file (experimental).                                                     |
 | `profile`                                        | string                                                            | Active profile name.                                                                                                       |
 | `profiles.<name>.*`                              | various                                                           | Profile‑scoped overrides of the same keys.                                                                                 |
 | `history.persistence`                            | `save-all` \| `none`                                              | History file persistence (default: `save-all`).                                                                            |

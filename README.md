@@ -24,7 +24,7 @@ npm install -g @openai/codex
 Alternatively, if you use Homebrew:
 
 ```shell
-brew install --cask codex
+brew install codex
 ```
 
 Then simply run `codex` to get started:

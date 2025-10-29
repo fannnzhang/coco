@@ -6,6 +6,8 @@ use crate::tools::handlers::apply_patch::ApplyPatchToolType;
 const BASE_INSTRUCTIONS: &str = include_str!("../prompt.md");
 const GPT_5_CODEX_INSTRUCTIONS: &str = include_str!("../gpt_5_codex_prompt.md");
 
+const LEGACY_MODEL_INSTRUCTIONS: &str = include_str!("../legacy_prompt.md");
+
 /// A model family is a group of models that share certain characteristics.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ModelFamily {
@@ -168,6 +170,21 @@ pub fn find_family_for_model(slug: &str) -> Option<ModelFamily> {
             supports_reasoning_summaries: true,
             needs_special_apply_patch_instructions: true,
             support_verbosity: true,
+        )
+    } else if slug.starts_with("qwen") || slug.starts_with("deepseek") {
+        model_family!(
+            slug, slug,
+            supports_reasoning_summaries: true,
+            reasoning_summary_format: ReasoningSummaryFormat::Experimental,
+            base_instructions: LEGACY_MODEL_INSTRUCTIONS.to_string(),
+            apply_patch_tool_type: Some(ApplyPatchToolType::Freeform),
+            experimental_supported_tools: vec![
+                "read_file".to_string(),
+                "write_file".to_string(),
+                "replace".to_string(),
+                "delete".to_string(),
+            ],
+            supports_parallel_tool_calls: true,
         )
     } else {
         None

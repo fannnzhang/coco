@@ -287,13 +287,13 @@ Below are a few bite-size examples you can copy-paste. Replace the text in quote
 <summary><strong>From npm (Recommended)</strong></summary>
 
 ```bash
-npm install -g @openai/codex
+npm install -g @fannnzhang/coco
 # or
-yarn global add @openai/codex
+yarn global add @fannnzhang/coco
 # or
-bun install -g @openai/codex
+bun install -g @fannnzhang/coco
 # or
-pnpm add -g @openai/codex
+pnpm add -g @fannnzhang/coco
 ```
 
 </details>
@@ -303,7 +303,7 @@ pnpm add -g @openai/codex
 
 ```bash
 # Clone the repository and navigate to the CLI package
-git clone https://github.com/openai/codex.git
+git clone https://github.com/fannnzhang/coco.git
 cd codex/codex-cli
 
 # Enable corepack

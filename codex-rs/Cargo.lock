@@ -821,6 +821,42 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e9b18233253483ce2f65329a24072ec414db782531bdbb7d0bbc4bd2ce6b7e21"
 
 [[package]]
+name = "coco-cli"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "assert_cmd",
+ "assert_matches",
+ "clap",
+ "clap_complete",
+ "codex-app-server",
+ "codex-app-server-protocol",
+ "codex-arg0",
+ "codex-chatgpt",
+ "codex-cloud-tasks",
+ "codex-common",
+ "codex-core",
+ "codex-exec",
+ "codex-login",
+ "codex-mcp-server",
+ "codex-process-hardening",
+ "codex-protocol",
+ "codex-protocol-ts",
+ "codex-responses-api-proxy",
+ "codex-rmcp-client",
+ "codex-stdio-to-uds",
+ "codex-tui",
+ "ctor 0.5.0",
+ "owo-colors",
+ "predicates",
+ "pretty_assertions",
+ "serde_json",
+ "supports-color",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "codex-ansi-escape"
 version = "0.0.0"
 dependencies = [
@@ -953,42 +989,6 @@ dependencies = [
  "codex-git-apply",
  "serde",
  "serde_json",
- "tempfile",
- "tokio",
-]
-
-[[package]]
-name = "codex-cli"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "assert_cmd",
- "assert_matches",
- "clap",
- "clap_complete",
- "codex-app-server",
- "codex-app-server-protocol",
- "codex-arg0",
- "codex-chatgpt",
- "codex-cloud-tasks",
- "codex-common",
- "codex-core",
- "codex-exec",
- "codex-login",
- "codex-mcp-server",
- "codex-process-hardening",
- "codex-protocol",
- "codex-protocol-ts",
- "codex-responses-api-proxy",
- "codex-rmcp-client",
- "codex-stdio-to-uds",
- "codex-tui",
- "ctor 0.5.0",
- "owo-colors",
- "predicates",
- "pretty_assertions",
- "serde_json",
- "supports-color",
  "tempfile",
  "tokio",
 ]

@@ -2,6 +2,8 @@
 //!
 //! Project-level documentation is primarily stored in files named `AGENTS.md`.
 //! Additional fallback filenames can be configured via `project_doc_fallback_filenames`.
+//! When [`Config::experimental_agents_file`] is set, that path overrides the
+//! discovery logic described below.
 //! We include the concatenation of all files found along the path from the
 //! repository root to the current working directory as follows:
 //!
@@ -111,6 +113,14 @@ pub async fn read_project_docs(config: &Config) -> std::io::Result<Option<String
 /// directory (inclusive). Symlinks are allowed. When `project_doc_max_bytes`
 /// is zero, returns an empty list.
 pub fn discover_project_doc_paths(config: &Config) -> std::io::Result<Vec<PathBuf>> {
+    if config.project_doc_max_bytes == 0 {
+        return Ok(Vec::new());
+    }
+
+    if let Some(path) = config.experimental_agents_file.as_ref() {
+        return Ok(vec![path.clone()]);
+    }
+
     let mut dir = config.cwd.clone();
     if let Ok(canon) = normalize_path(&dir) {
         dir = canon;
@@ -446,5 +456,50 @@ mod tests {
                 .to_string_lossy()
                 .eq(DEFAULT_PROJECT_DOC_FILENAME)
         );
+    }
+
+    /// An explicit experimental_agents_file override replaces discovery.
+    #[tokio::test]
+    async fn experimental_agents_file_overrides_discovery() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        fs::write(tmp.path().join("AGENTS.md"), "default root").unwrap();
+        let nested = tmp.path().join("workspace");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(nested.join("AGENTS.md"), "default nested").unwrap();
+
+        let override_path = tmp.path().join("custom-agents.md");
+        fs::write(&override_path, "override instructions").unwrap();
+
+        let mut cfg = make_config(&tmp, 4096, None);
+        cfg.cwd = nested;
+        cfg.experimental_agents_file = Some(override_path.clone());
+
+        let docs = read_project_docs(&cfg)
+            .await
+            .expect("docs should load from override");
+        assert_eq!(docs.as_deref(), Some("override instructions"));
+
+        let discovery = discover_project_doc_paths(&cfg).expect("discover paths");
+        assert_eq!(discovery, vec![override_path]);
+    }
+
+    /// project_doc_max_bytes still disables docs even with an override.
+    #[tokio::test]
+    async fn experimental_agents_file_respects_byte_limit() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let override_path = tmp.path().join("custom-agents.md");
+        fs::write(&override_path, "override instructions").unwrap();
+
+        let mut cfg = make_config(&tmp, 0, None);
+        cfg.experimental_agents_file = Some(override_path.clone());
+
+        let docs = read_project_docs(&cfg).await.expect("should succeed");
+        assert!(
+            docs.is_none(),
+            "override should be ignored when limit is zero"
+        );
+
+        let discovery = discover_project_doc_paths(&cfg).expect("discover paths");
+        assert!(discovery.is_empty());
     }
 }

@@ -1,9 +1,9 @@
 {
-  "name": "@openai/codex",
+  "name": "coco",
   "version": "0.0.0-dev",
   "license": "Apache-2.0",
   "bin": {
-    "codex": "bin/codex.js"
+    "coco": "bin/coco.js"
   },
   "type": "module",
   "engines": {
@@ -15,7 +15,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/openai/codex.git",
-    "directory": "codex-cli"
+    "url": "git+https://github.com/fannnzhang/coco.git",
+    "directory": "coco-cli"
   }
 }

@@ -29,7 +29,7 @@ use crate::sandboxing::SandboxManager;
 use crate::spawn::StdioPolicy;
 use crate::spawn::spawn_child_async;
 
-const DEFAULT_TIMEOUT_MS: u64 = 10_000;
+const DEFAULT_TIMEOUT_MS: u64 = 2_000 * 60 * 10; //20 mins
 
 // Hardcode these since it does not seem worth including the libc crate just
 // for these.

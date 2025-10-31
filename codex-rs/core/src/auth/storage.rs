@@ -1,12 +1,16 @@
 use chrono::DateTime;
+use chrono::Duration as ChronoDuration;
 use chrono::Utc;
+use filetime::FileTime;
 use serde::Deserialize;
 use serde::Serialize;
 use sha2::Digest;
 use sha2::Sha256;
+use std::ffi::OsStr;
 use std::fmt::Debug;
 use std::fs::File;
 use std::fs::OpenOptions;
+use std::io::ErrorKind;
 use std::io::Read;
 use std::io::Write;
 #[cfg(unix)]
@@ -14,8 +18,13 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::MutexGuard;
+use std::time::Duration;
+use std::time::SystemTime;
 use tracing::warn;
 
+use crate::token_data::PlanType;
 use crate::token_data::TokenData;
 use codex_keyring_store::DefaultKeyringStore;
 use codex_keyring_store::KeyringStore;
@@ -33,6 +42,76 @@ pub enum AuthCredentialsStoreMode {
     Auto,
 }
 
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Eq, Default)]
+pub struct AccountState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_issue: Option<AccountIssue>,
+}
+
+impl AccountState {
+    pub fn record_issue(&mut self, issue: AccountIssue) {
+        self.last_issue = Some(issue);
+    }
+
+    pub fn current_issue(&self, now: DateTime<Utc>) -> Option<&AccountIssue> {
+        match self.last_issue.as_ref() {
+            Some(AccountIssue::UsageLimit(status)) if status.is_active(now) => {
+                self.last_issue.as_ref()
+            }
+            Some(AccountIssue::UsageLimit(_)) => None,
+            other => other,
+        }
+    }
+
+    pub fn current_usage_limit(&self, now: DateTime<Utc>) -> Option<&UsageLimitStatus> {
+        match self.current_issue(now) {
+            Some(AccountIssue::UsageLimit(status)) => Some(status),
+            _ => None,
+        }
+    }
+
+    pub fn is_available(&self, now: DateTime<Utc>) -> bool {
+        self.current_usage_limit(now).is_none()
+    }
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AccountIssue {
+    UsageLimit(UsageLimitStatus),
+    UnexpectedResponse(UnexpectedResponseStatus),
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct UsageLimitStatus {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan_type: Option<PlanType>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resets_at: Option<DateTime<Utc>>,
+    pub recorded_at: DateTime<Utc>,
+}
+
+impl UsageLimitStatus {
+    pub fn next_retry_at(&self) -> DateTime<Utc> {
+        self.resets_at
+            .unwrap_or_else(|| self.recorded_at + ChronoDuration::hours(5))
+    }
+
+    pub fn is_active(&self, now: DateTime<Utc>) -> bool {
+        self.next_retry_at() > now
+    }
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct UnexpectedResponseStatus {
+    pub recorded_at: DateTime<Utc>,
+    pub status: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub body: String,
+}
+
 /// Expected structure for $CODEX_HOME/auth.json.
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 pub struct AuthDotJson {
@@ -44,6 +123,31 @@ pub struct AuthDotJson {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_refresh: Option<DateTime<Utc>>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_state: Option<AccountState>,
+}
+
+impl AuthDotJson {
+    pub fn is_available(&self, now: DateTime<Utc>) -> bool {
+        self.account_state
+            .as_ref()
+            .map_or(true, |state| state.is_available(now))
+    }
+
+    pub fn current_usage_limit(&self, now: DateTime<Utc>) -> Option<&UsageLimitStatus> {
+        self.account_state
+            .as_ref()
+            .and_then(|state| state.current_usage_limit(now))
+    }
+}
+
+enum CandidateOutcome {
+    Available(AuthDotJson),
+    UsageLimited {
+        auth: AuthDotJson,
+        limit: UsageLimitStatus,
+    },
 }
 
 pub(super) fn get_auth_file(codex_home: &Path) -> PathBuf {
@@ -68,11 +172,143 @@ pub(super) trait AuthStorageBackend: Debug + Send + Sync {
 #[derive(Clone, Debug)]
 pub(super) struct FileAuthStorage {
     codex_home: PathBuf,
+    active_auth_file: Arc<Mutex<Option<PathBuf>>>,
 }
 
 impl FileAuthStorage {
     pub(super) fn new(codex_home: PathBuf) -> Self {
-        Self { codex_home }
+        Self {
+            codex_home,
+            active_auth_file: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    fn lock_active_auth_file(&self) -> MutexGuard<'_, Option<PathBuf>> {
+        match self.active_auth_file.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
+    fn clear_active_if_matches(&self, path: &Path) {
+        let mut guard = self.lock_active_auth_file();
+        if guard.as_ref().map_or(false, |current| current == path) {
+            guard.take();
+        }
+    }
+
+    fn set_active_path(&self, path: PathBuf) {
+        let mut guard = self.lock_active_auth_file();
+        *guard = Some(path);
+    }
+
+    fn accounts_dir(&self) -> PathBuf {
+        self.codex_home.join("auth")
+    }
+
+    fn write_json(&self, path: &Path, auth: &AuthDotJson) -> std::io::Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let json_data = serde_json::to_string_pretty(auth)?;
+        let mut options = OpenOptions::new();
+        options.truncate(true).write(true).create(true);
+        #[cfg(unix)]
+        {
+            options.mode(0o600);
+        }
+        let mut file = options.open(path)?;
+        file.write_all(json_data.as_bytes())?;
+        file.flush()?;
+        Ok(())
+    }
+
+    fn write_current_auth(&self, auth: &AuthDotJson) -> std::io::Result<()> {
+        let current = get_auth_file(&self.codex_home);
+        self.write_json(&current, auth)?;
+        self.mark_file_used(&current);
+        Ok(())
+    }
+
+    fn infer_account_file(&self, auth: &AuthDotJson) -> Option<PathBuf> {
+        let email = auth.tokens.as_ref()?.id_token.email.as_ref()?;
+        Some(self.accounts_dir().join(format!("{email}.json")))
+    }
+
+    fn candidate_paths(&self) -> std::io::Result<Vec<PathBuf>> {
+        let mut candidates: Vec<(u128, PathBuf)> = Vec::new();
+        match std::fs::read_dir(self.accounts_dir()) {
+            Ok(iter) => {
+                for entry in iter {
+                    let entry = match entry {
+                        Ok(entry) => entry,
+                        Err(err) => {
+                            warn!("failed to read auth directory entry: {err}");
+                            continue;
+                        }
+                    };
+
+                    let path = entry.path();
+                    let file_type = match entry.file_type() {
+                        Ok(file_type) => file_type,
+                        Err(err) => {
+                            warn!(
+                                "failed to inspect auth directory entry for {}: {err}",
+                                path.display()
+                            );
+                            continue;
+                        }
+                    };
+                    if !file_type.is_file() || !is_email_auth_candidate(&path) {
+                        continue;
+                    }
+
+                    let metadata = match entry.metadata() {
+                        Ok(metadata) => metadata,
+                        Err(err) => {
+                            warn!("failed to read metadata for {}: {err}", path.display());
+                            continue;
+                        }
+                    };
+                    let modified = modified_millis(&metadata);
+                    candidates.push((modified, path));
+                }
+            }
+            Err(err) if err.kind() == ErrorKind::NotFound => {}
+            Err(err) => return Err(err),
+        }
+
+        candidates.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(candidates.into_iter().map(|(_, path)| path).collect())
+    }
+
+    fn mark_file_used(&self, path: &Path) {
+        if let Err(err) = filetime::set_file_mtime(path, FileTime::now()) {
+            warn!(
+                "failed to update auth file timestamp for {}: {err}",
+                path.display()
+            );
+        }
+    }
+
+    fn evaluate_candidate(
+        &self,
+        path: &Path,
+        now: DateTime<Utc>,
+    ) -> std::io::Result<Option<CandidateOutcome>> {
+        match self.try_read_auth_json(path) {
+            Ok(auth) => {
+                if let Some(limit) = auth.current_usage_limit(now).cloned() {
+                    return Ok(Some(CandidateOutcome::UsageLimited { auth, limit }));
+                }
+                Ok(Some(CandidateOutcome::Available(auth)))
+            }
+            Err(err) if err.kind() == ErrorKind::NotFound => {
+                self.clear_active_if_matches(path);
+                Ok(None)
+            }
+            Err(err) => Err(err),
+        }
     }
 
     /// Attempt to read and refresh the `auth.json` file in the given `CODEX_HOME` directory.
@@ -87,38 +323,133 @@ impl FileAuthStorage {
     }
 }
 
+fn is_email_auth_candidate(path: &Path) -> bool {
+    if path.file_name() == Some(OsStr::new("auth.json")) {
+        return false;
+    }
+    if path
+        .extension()
+        .and_then(OsStr::to_str)
+        .map_or(true, |ext| ext != "json")
+    {
+        return false;
+    }
+    path.file_stem()
+        .and_then(OsStr::to_str)
+        .map_or(false, |stem| stem.contains('@'))
+}
+
+fn modified_millis(metadata: &std::fs::Metadata) -> u128 {
+    match metadata.modified() {
+        Ok(time) => match time.duration_since(SystemTime::UNIX_EPOCH) {
+            Ok(duration) => duration.as_millis(),
+            Err(_) => Duration::ZERO.as_millis(),
+        },
+        Err(_) => Duration::ZERO.as_millis(),
+    }
+}
+
 impl AuthStorageBackend for FileAuthStorage {
     fn load(&self) -> std::io::Result<Option<AuthDotJson>> {
-        let auth_file = get_auth_file(&self.codex_home);
-        let auth_dot_json = match self.try_read_auth_json(&auth_file) {
-            Ok(auth) => auth,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(err) => return Err(err),
-        };
-        Ok(Some(auth_dot_json))
+        let now = Utc::now();
+
+        let mut ordered_paths: Vec<PathBuf> = Vec::new();
+        if let Some(active) = self.lock_active_auth_file().clone() {
+            ordered_paths.push(active);
+        }
+        for path in self.candidate_paths()? {
+            if !ordered_paths.iter().any(|existing| existing == &path) {
+                ordered_paths.push(path);
+            }
+        }
+
+        let mut blocked: Option<(DateTime<Utc>, PathBuf, AuthDotJson)> = None;
+
+        for path in ordered_paths {
+            let outcome = match self.evaluate_candidate(&path, now)? {
+                Some(outcome) => outcome,
+                None => continue,
+            };
+
+            match outcome {
+                CandidateOutcome::Available(auth) => {
+                    self.set_active_path(path.clone());
+                    self.mark_file_used(&path);
+                    self.write_current_auth(&auth)?;
+                    return Ok(Some(auth));
+                }
+                CandidateOutcome::UsageLimited { auth, limit } => {
+                    self.clear_active_if_matches(&path);
+                    let retry_at = limit.next_retry_at();
+                    if blocked
+                        .as_ref()
+                        .map_or(true, |(best_retry, _, _)| retry_at < *best_retry)
+                    {
+                        blocked = Some((retry_at, path.clone(), auth));
+                    }
+                }
+            }
+        }
+
+        if let Some((_, path, auth)) = blocked {
+            self.set_active_path(path);
+            self.write_current_auth(&auth)?;
+            return Ok(Some(auth));
+        }
+
+        let fallback = get_auth_file(&self.codex_home);
+        match std::fs::metadata(&fallback) {
+            Ok(metadata) if metadata.is_file() => match self.try_read_auth_json(&fallback) {
+                Ok(auth) => {
+                    self.mark_file_used(&fallback);
+                    return Ok(Some(auth));
+                }
+                Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
+                Err(err) => Err(err),
+            },
+            Ok(_) => Ok(None),
+            Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
+            Err(err) => Err(err),
+        }
     }
 
     fn save(&self, auth_dot_json: &AuthDotJson) -> std::io::Result<()> {
-        let auth_file = get_auth_file(&self.codex_home);
+        let current_active = {
+            let guard = self.lock_active_auth_file();
+            guard.clone()
+        };
+        let account_target = current_active.or_else(|| self.infer_account_file(auth_dot_json));
 
-        if let Some(parent) = auth_file.parent() {
-            std::fs::create_dir_all(parent)?;
+        if let Some(path) = account_target {
+            self.write_json(&path, auth_dot_json)?;
+            self.mark_file_used(&path);
+            self.set_active_path(path);
+            self.write_current_auth(auth_dot_json)?;
+            return Ok(());
         }
-        let json_data = serde_json::to_string_pretty(auth_dot_json)?;
-        let mut options = OpenOptions::new();
-        options.truncate(true).write(true).create(true);
-        #[cfg(unix)]
-        {
-            options.mode(0o600);
-        }
-        let mut file = options.open(auth_file)?;
-        file.write_all(json_data.as_bytes())?;
-        file.flush()?;
+
+        let fallback = get_auth_file(&self.codex_home);
+        self.write_json(&fallback, auth_dot_json)?;
+        self.mark_file_used(&fallback);
         Ok(())
     }
 
     fn delete(&self) -> std::io::Result<bool> {
-        delete_file_if_exists(&self.codex_home)
+        let removed_active = {
+            let mut guard = self.lock_active_auth_file();
+            let active = guard.take();
+            match active {
+                Some(path) => match std::fs::remove_file(&path) {
+                    Ok(()) => true,
+                    Err(err) if err.kind() == ErrorKind::NotFound => false,
+                    Err(err) => return Err(err),
+                },
+                None => false,
+            }
+        };
+
+        let removed_fallback = delete_file_if_exists(&self.codex_home)?;
+        Ok(removed_active || removed_fallback)
     }
 }
 
@@ -283,6 +614,7 @@ mod tests {
     use crate::token_data::IdTokenInfo;
     use anyhow::Context;
     use base64::Engine;
+    use filetime::FileTime;
     use pretty_assertions::assert_eq;
     use serde_json::json;
     use tempfile::tempdir;
@@ -298,6 +630,7 @@ mod tests {
             openai_api_key: Some("test-key".to_string()),
             tokens: None,
             last_refresh: Some(Utc::now()),
+            account_state: None,
         };
 
         storage
@@ -317,6 +650,7 @@ mod tests {
             openai_api_key: Some("test-key".to_string()),
             tokens: None,
             last_refresh: Some(Utc::now()),
+            account_state: None,
         };
 
         let file = get_auth_file(codex_home.path());
@@ -338,6 +672,7 @@ mod tests {
             openai_api_key: Some("sk-test-key".to_string()),
             tokens: None,
             last_refresh: None,
+            account_state: None,
         };
         let storage = create_auth_storage(dir.path().to_path_buf(), AuthCredentialsStoreMode::File);
         storage.save(&auth_dot_json)?;
@@ -346,6 +681,158 @@ mod tests {
         let removed = storage.delete()?;
         assert!(removed);
         assert!(!dir.path().join("auth.json").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn file_storage_load_rotates_between_oldest_email_files() -> anyhow::Result<()> {
+        let codex_home = tempdir()?;
+        let alice_auth = auth_with_prefix("alice");
+        let bob_auth = auth_with_prefix("bob");
+        let auth_dir = codex_home.path().join("auth");
+        std::fs::create_dir_all(&auth_dir)?;
+        let alice_path = auth_dir.join("alice@example.com.json");
+        let bob_path = auth_dir.join("bob@example.com.json");
+        std::fs::write(
+            &alice_path,
+            serde_json::to_string_pretty(&alice_auth).context("serialize alice auth")?,
+        )?;
+        std::fs::write(
+            &bob_path,
+            serde_json::to_string_pretty(&bob_auth).context("serialize bob auth")?,
+        )?;
+        filetime::set_file_mtime(&alice_path, FileTime::from_unix_time(1, 0))?;
+        filetime::set_file_mtime(&bob_path, FileTime::from_unix_time(10, 0))?;
+
+        let storage = FileAuthStorage::new(codex_home.path().to_path_buf());
+        let first = <FileAuthStorage as AuthStorageBackend>::load(&storage)?
+            .expect("should load alice auth first");
+        assert_eq!(first, alice_auth);
+
+        let alice_mtime = std::fs::metadata(&alice_path)?.modified()?;
+        let bob_mtime_before = std::fs::metadata(&bob_path)?.modified()?;
+        assert!(
+            alice_mtime > bob_mtime_before,
+            "alice mtime should update after use"
+        );
+
+        let storage_second = FileAuthStorage::new(codex_home.path().to_path_buf());
+        let second = <FileAuthStorage as AuthStorageBackend>::load(&storage_second)?
+            .expect("should load bob auth second");
+        assert_eq!(second, bob_auth);
+        let current_path = codex_home.path().join("auth.json");
+        let current = storage_second
+            .try_read_auth_json(&current_path)
+            .context("read current auth.json")?;
+        assert_eq!(current, bob_auth);
+        Ok(())
+    }
+
+    #[test]
+    fn file_storage_load_skips_usage_limited_accounts() -> anyhow::Result<()> {
+        let codex_home = tempdir()?;
+        let mut limited_auth = auth_with_prefix("alice");
+        let mut limited_state = AccountState::default();
+        limited_state.record_issue(AccountIssue::UsageLimit(UsageLimitStatus {
+            plan_type: None,
+            resets_at: Some(Utc::now() + chrono::Duration::hours(1)),
+            recorded_at: Utc::now(),
+        }));
+        limited_auth.account_state = Some(limited_state);
+        let available_auth = auth_with_prefix("bob");
+
+        let auth_dir = codex_home.path().join("auth");
+        std::fs::create_dir_all(&auth_dir)?;
+        let limited_path = auth_dir.join("alice@example.com.json");
+        let available_path = auth_dir.join("bob@example.com.json");
+        std::fs::write(
+            &limited_path,
+            serde_json::to_string_pretty(&limited_auth).context("serialize limited auth")?,
+        )?;
+        std::fs::write(
+            &available_path,
+            serde_json::to_string_pretty(&available_auth).context("serialize available auth")?,
+        )?;
+        filetime::set_file_mtime(&limited_path, FileTime::from_unix_time(1, 0))?;
+        filetime::set_file_mtime(&available_path, FileTime::from_unix_time(5, 0))?;
+
+        let storage = FileAuthStorage::new(codex_home.path().to_path_buf());
+        let loaded = storage
+            .load()
+            .context("load should skip limited account")?
+            .expect("available auth should load");
+        assert_eq!(loaded, available_auth);
+        let current_path = codex_home.path().join("auth.json");
+        let current = storage
+            .try_read_auth_json(&current_path)
+            .context("read current auth.json after skipping limited")?;
+        assert_eq!(current, available_auth);
+        Ok(())
+    }
+
+    #[test]
+    fn file_storage_load_returns_limited_when_only_blocked_accounts() -> anyhow::Result<()> {
+        let codex_home = tempdir()?;
+        let mut limited_auth = auth_with_prefix("alice");
+        let mut limited_state = AccountState::default();
+        limited_state.record_issue(AccountIssue::UsageLimit(UsageLimitStatus {
+            plan_type: None,
+            resets_at: Some(Utc::now() + chrono::Duration::hours(1)),
+            recorded_at: Utc::now(),
+        }));
+        limited_auth.account_state = Some(limited_state);
+        let auth_dir = codex_home.path().join("auth");
+        std::fs::create_dir_all(&auth_dir)?;
+        let limited_path = auth_dir.join("alice@example.com.json");
+        std::fs::write(
+            &limited_path,
+            serde_json::to_string_pretty(&limited_auth).context("serialize limited auth")?,
+        )?;
+
+        let storage = FileAuthStorage::new(codex_home.path().to_path_buf());
+        let loaded = storage
+            .load()
+            .context("load should fall back to limited auth when all blocked")?
+            .expect("limited auth should still be returned");
+        assert_eq!(loaded, limited_auth);
+        let current_path = codex_home.path().join("auth.json");
+        let current = storage
+            .try_read_auth_json(&current_path)
+            .context("read current auth.json for limited account")?;
+        assert_eq!(current, limited_auth);
+        Ok(())
+    }
+
+    #[test]
+    fn file_storage_save_writes_to_active_email_file() -> anyhow::Result<()> {
+        let codex_home = tempdir()?;
+        let alice_auth = auth_with_prefix("alice");
+        let auth_dir = codex_home.path().join("auth");
+        std::fs::create_dir_all(&auth_dir)?;
+        let alice_path = auth_dir.join("alice@example.com.json");
+        std::fs::write(
+            &alice_path,
+            serde_json::to_string_pretty(&alice_auth).context("serialize alice auth")?,
+        )?;
+
+        let storage = FileAuthStorage::new(codex_home.path().to_path_buf());
+        let loaded = <FileAuthStorage as AuthStorageBackend>::load(&storage)?
+            .expect("should load alice auth");
+        assert_eq!(loaded, alice_auth);
+
+        let mut updated = loaded.clone();
+        updated.openai_api_key = Some("alice-updated".to_string());
+        <FileAuthStorage as AuthStorageBackend>::save(&storage, &updated)?;
+
+        let saved = storage
+            .try_read_auth_json(&alice_path)
+            .context("read updated alice auth")?;
+        assert_eq!(saved, updated);
+        let current_path = codex_home.path().join("auth.json");
+        let current = storage
+            .try_read_auth_json(&current_path)
+            .context("read current auth.json after save")?;
+        assert_eq!(current, updated);
         Ok(())
     }
 
@@ -432,6 +919,7 @@ mod tests {
                 account_id: Some(format!("{prefix}-account-id")),
             }),
             last_refresh: None,
+            account_state: None,
         }
     }
 
@@ -447,6 +935,7 @@ mod tests {
             openai_api_key: Some("sk-test".to_string()),
             tokens: None,
             last_refresh: None,
+            account_state: None,
         };
         seed_keyring_with_auth(
             &mock_keyring,
@@ -488,6 +977,7 @@ mod tests {
                 account_id: Some("account".to_string()),
             }),
             last_refresh: Some(Utc::now()),
+            account_state: None,
         };
 
         storage.save(&auth)?;

@@ -11,21 +11,29 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::MutexGuard;
 use std::time::Duration;
 
 use codex_app_server_protocol::AuthMode;
 use codex_protocol::config_types::ForcedLoginMethod;
 
+use crate::auth::storage::AccountIssue;
+use crate::auth::storage::AccountState;
 pub use crate::auth::storage::AuthCredentialsStoreMode;
 pub use crate::auth::storage::AuthDotJson;
 use crate::auth::storage::AuthStorageBackend;
+use crate::auth::storage::UnexpectedResponseStatus;
+use crate::auth::storage::UsageLimitStatus;
 use crate::auth::storage::create_auth_storage;
 use crate::config::Config;
 use crate::default_client::CodexHttpClient;
+use crate::error::UnexpectedResponseError;
+use crate::error::UsageLimitReachedError;
 use crate::token_data::PlanType;
 use crate::token_data::TokenData;
 use crate::token_data::parse_id_token;
 use crate::util::try_parse_error_message;
+use tracing::warn;
 
 #[derive(Debug, Clone)]
 pub struct CodexAuth {
@@ -158,6 +166,71 @@ impl CodexAuth {
             .and_then(|t| t.id_token.chatgpt_plan_type)
     }
 
+    fn lock_auth_json(&self) -> MutexGuard<'_, Option<AuthDotJson>> {
+        match self.auth_dot_json.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
+    fn update_account_state<F>(&self, update: F)
+    where
+        F: FnOnce(&mut AccountState),
+    {
+        if self.mode != AuthMode::ChatGPT {
+            return;
+        }
+
+        let current = {
+            let guard = self.lock_auth_json();
+            (*guard).clone()
+        };
+
+        let Some(mut auth) = current else {
+            return;
+        };
+
+        let mut state = auth.account_state.unwrap_or_default();
+        update(&mut state);
+        auth.account_state = Some(state);
+
+        if let Err(err) = self.storage.save(&auth) {
+            warn!("failed to persist account state: {err}");
+            return;
+        }
+
+        let mut guard = self.lock_auth_json();
+        *guard = Some(auth);
+    }
+
+    pub(crate) fn record_usage_limit(&self, error: &UsageLimitReachedError) {
+        let recorded_at = Utc::now();
+        let plan_type = error.plan_type.clone();
+        let resets_at = error.resets_at;
+        self.update_account_state(|state| {
+            state.record_issue(AccountIssue::UsageLimit(UsageLimitStatus {
+                plan_type,
+                resets_at,
+                recorded_at,
+            }));
+        });
+    }
+
+    pub(crate) fn record_unexpected_response(&self, error: &UnexpectedResponseError) {
+        let recorded_at = Utc::now();
+        let status = i32::from(error.status.as_u16());
+        let request_id = error.request_id.clone();
+        let body = error.body.clone();
+        self.update_account_state(|state| {
+            state.record_issue(AccountIssue::UnexpectedResponse(UnexpectedResponseStatus {
+                recorded_at,
+                status,
+                request_id,
+                body,
+            }));
+        });
+    }
+
     fn get_current_auth_json(&self) -> Option<AuthDotJson> {
         #[expect(clippy::unwrap_used)]
         self.auth_dot_json.lock().unwrap().clone()
@@ -178,6 +251,7 @@ impl CodexAuth {
                 account_id: Some("account_id".to_string()),
             }),
             last_refresh: Some(Utc::now()),
+            account_state: None,
         };
 
         let auth_dot_json = Arc::new(Mutex::new(Some(auth_dot_json)));
@@ -242,6 +316,7 @@ pub fn login_with_api_key(
         openai_api_key: Some(api_key.to_string()),
         tokens: None,
         last_refresh: None,
+        account_state: None,
     };
     save_auth(codex_home, &auth_dot_json, auth_credentials_store_mode)
 }
@@ -377,6 +452,7 @@ fn load_auth(
         openai_api_key: auth_json_api_key,
         tokens,
         last_refresh,
+        account_state,
     } = auth_dot_json;
 
     // Prefer AuthMode.ApiKey if it's set in the auth.json.
@@ -392,6 +468,7 @@ fn load_auth(
             openai_api_key: None,
             tokens,
             last_refresh,
+            account_state,
         }))),
         client,
     }))
@@ -495,9 +572,11 @@ mod tests {
     use crate::token_data::KnownPlan;
     use crate::token_data::PlanType;
 
+    use anyhow::Context;
     use base64::Engine;
     use codex_protocol::config_types::ForcedLoginMethod;
     use pretty_assertions::assert_eq;
+    use reqwest::StatusCode;
     use serde::Serialize;
     use serde_json::json;
     use tempfile::tempdir;
@@ -619,6 +698,7 @@ mod tests {
                     account_id: None,
                 }),
                 last_refresh: Some(last_refresh),
+                account_state: None,
             },
             auth_dot_json
         );
@@ -651,12 +731,114 @@ mod tests {
             openai_api_key: Some("sk-test-key".to_string()),
             tokens: None,
             last_refresh: None,
+            account_state: None,
         };
         super::save_auth(dir.path(), &auth_dot_json, AuthCredentialsStoreMode::File)?;
         let auth_file = get_auth_file(dir.path());
         assert!(auth_file.exists());
         assert!(logout(dir.path(), AuthCredentialsStoreMode::File)?);
         assert!(!auth_file.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn record_usage_limit_persists_account_state() -> anyhow::Result<()> {
+        let dir = tempdir()?;
+        let storage = Arc::new(FileAuthStorage::new(dir.path().to_path_buf()));
+        let auth = AuthDotJson {
+            openai_api_key: None,
+            tokens: Some(TokenData {
+                id_token: Default::default(),
+                access_token: "access".to_string(),
+                refresh_token: "refresh".to_string(),
+                account_id: None,
+            }),
+            last_refresh: Some(Utc::now()),
+            account_state: None,
+        };
+        AuthStorageBackend::save(&*storage, &auth)?;
+        let storage_arc: Arc<dyn AuthStorageBackend> = storage.clone();
+        let codex_auth = CodexAuth {
+            mode: AuthMode::ChatGPT,
+            api_key: None,
+            auth_dot_json: Arc::new(Mutex::new(Some(auth))),
+            storage: storage_arc.clone(),
+            client: crate::default_client::create_client(),
+        };
+
+        let error = UsageLimitReachedError {
+            plan_type: None,
+            resets_at: Some(Utc::now() + chrono::Duration::hours(1)),
+            rate_limits: None,
+        };
+
+        codex_auth.record_usage_limit(&error);
+
+        let persisted = storage_arc
+            .load()
+            .context("load persisted auth")?
+            .expect("auth should exist after recording usage limit");
+        let usage_limit = persisted
+            .account_state
+            .as_ref()
+            .and_then(|state| state.current_usage_limit(Utc::now()))
+            .expect("usage limit should be recorded");
+        assert_eq!(usage_limit.plan_type, None);
+        assert_eq!(usage_limit.resets_at, error.resets_at);
+        Ok(())
+    }
+
+    #[test]
+    fn record_unexpected_response_tracks_issue() -> anyhow::Result<()> {
+        let dir = tempdir()?;
+        let storage = Arc::new(FileAuthStorage::new(dir.path().to_path_buf()));
+        let auth = AuthDotJson {
+            openai_api_key: None,
+            tokens: Some(TokenData {
+                id_token: Default::default(),
+                access_token: "access".to_string(),
+                refresh_token: "refresh".to_string(),
+                account_id: None,
+            }),
+            last_refresh: Some(Utc::now()),
+            account_state: None,
+        };
+        AuthStorageBackend::save(&*storage, &auth)?;
+        let storage_arc: Arc<dyn AuthStorageBackend> = storage.clone();
+        let codex_auth = CodexAuth {
+            mode: AuthMode::ChatGPT,
+            api_key: None,
+            auth_dot_json: Arc::new(Mutex::new(Some(auth))),
+            storage: storage_arc.clone(),
+            client: crate::default_client::create_client(),
+        };
+
+        let error = UnexpectedResponseError {
+            status: StatusCode::BAD_REQUEST,
+            body: "bad request".to_string(),
+            request_id: Some("req_123".to_string()),
+        };
+
+        codex_auth.record_unexpected_response(&error);
+
+        let persisted = storage_arc
+            .load()
+            .context("load persisted auth")?
+            .expect("auth should exist after recording unexpected response");
+        let issue = persisted
+            .account_state
+            .as_ref()
+            .and_then(|state| state.current_issue(Utc::now()))
+            .expect("issue should be recorded");
+        match issue {
+            AccountIssue::UnexpectedResponse(details) => {
+                assert_eq!(details.status, i32::from(StatusCode::BAD_REQUEST.as_u16()));
+                assert_eq!(details.request_id.as_deref(), Some("req_123"));
+                assert_eq!(details.body, "bad request");
+            }
+            other => panic!("expected unexpected response issue, got {other:?}"),
+        }
+
         Ok(())
     }
 

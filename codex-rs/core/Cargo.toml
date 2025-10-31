@@ -36,6 +36,7 @@ dirs = { workspace = true }
 dunce = { workspace = true }
 env-flags = { workspace = true }
 eventsource-stream = { workspace = true }
+filetime = { workspace = true }
 futures = { workspace = true }
 http = { workspace = true }
 indexmap = { workspace = true }

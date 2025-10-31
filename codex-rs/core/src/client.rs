@@ -410,12 +410,16 @@ impl ModelClient {
                 {
                     // Surface the error body to callers. Use `unwrap_or_default` per Clippy.
                     let body = res.text().await.unwrap_or_default();
+                    let unexpected = UnexpectedResponseError {
+                        status,
+                        body,
+                        request_id: request_id.clone(),
+                    };
+                    if let Some(auth_ref) = auth.as_ref() {
+                        auth_ref.record_unexpected_response(&unexpected);
+                    }
                     return Err(StreamAttemptError::Fatal(CodexErr::UnexpectedStatus(
-                        UnexpectedResponseError {
-                            status,
-                            body,
-                            request_id: None,
-                        },
+                        unexpected,
                     )));
                 }
 
@@ -433,12 +437,17 @@ impl ModelClient {
                             let resets_at = error
                                 .resets_at
                                 .and_then(|seconds| DateTime::<Utc>::from_timestamp(seconds, 0));
-                            let codex_err = CodexErr::UsageLimitReached(UsageLimitReachedError {
+                            let usage_limit_err = UsageLimitReachedError {
                                 plan_type,
                                 resets_at,
                                 rate_limits: rate_limit_snapshot,
-                            });
-                            return Err(StreamAttemptError::Fatal(codex_err));
+                            };
+                            if let Some(auth_ref) = auth.as_ref() {
+                                auth_ref.record_usage_limit(&usage_limit_err);
+                            }
+                            return Err(StreamAttemptError::Fatal(CodexErr::UsageLimitReached(
+                                usage_limit_err,
+                            )));
                         } else if error.r#type.as_deref() == Some("usage_not_included") {
                             return Err(StreamAttemptError::Fatal(CodexErr::UsageNotIncluded));
                         }

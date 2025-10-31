@@ -562,6 +562,7 @@ pub(crate) async fn persist_tokens_async(
             openai_api_key: api_key,
             tokens: Some(tokens),
             last_refresh: Some(Utc::now()),
+            account_state: None,
         };
         save_auth(&codex_home, &auth, auth_credentials_store_mode)
     })

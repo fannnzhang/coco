@@ -132,7 +132,7 @@ impl AuthDotJson {
     pub fn is_available(&self, now: DateTime<Utc>) -> bool {
         self.account_state
             .as_ref()
-            .map_or(true, |state| state.is_available(now))
+            .is_none_or(|state| state.is_available(now))
     }
 
     pub fn current_usage_limit(&self, now: DateTime<Utc>) -> Option<&UsageLimitStatus> {
@@ -167,6 +167,9 @@ pub(super) trait AuthStorageBackend: Debug + Send + Sync {
     fn load(&self) -> std::io::Result<Option<AuthDotJson>>;
     fn save(&self, auth: &AuthDotJson) -> std::io::Result<()>;
     fn delete(&self) -> std::io::Result<bool>;
+    fn invalidate_active_account(&self) -> std::io::Result<Option<PathBuf>> {
+        Ok(None)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -192,7 +195,7 @@ impl FileAuthStorage {
 
     fn clear_active_if_matches(&self, path: &Path) {
         let mut guard = self.lock_active_auth_file();
-        if guard.as_ref().map_or(false, |current| current == path) {
+        if guard.as_ref().is_some_and(|current| current == path) {
             guard.take();
         }
     }
@@ -329,14 +332,13 @@ fn is_email_auth_candidate(path: &Path) -> bool {
     }
     if path
         .extension()
-        .and_then(OsStr::to_str)
-        .map_or(true, |ext| ext != "json")
+        .and_then(OsStr::to_str) != Some("json")
     {
         return false;
     }
     path.file_stem()
         .and_then(OsStr::to_str)
-        .map_or(false, |stem| stem.contains('@'))
+        .is_some_and(|stem| stem.contains('@'))
 }
 
 fn modified_millis(metadata: &std::fs::Metadata) -> u128 {
@@ -383,7 +385,7 @@ impl AuthStorageBackend for FileAuthStorage {
                     let retry_at = limit.next_retry_at();
                     if blocked
                         .as_ref()
-                        .map_or(true, |(best_retry, _, _)| retry_at < *best_retry)
+                        .is_none_or(|(best_retry, _, _)| retry_at < *best_retry)
                     {
                         blocked = Some((retry_at, path.clone(), auth));
                     }
@@ -402,7 +404,7 @@ impl AuthStorageBackend for FileAuthStorage {
             Ok(metadata) if metadata.is_file() => match self.try_read_auth_json(&fallback) {
                 Ok(auth) => {
                     self.mark_file_used(&fallback);
-                    return Ok(Some(auth));
+                    Ok(Some(auth))
                 }
                 Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
                 Err(err) => Err(err),
@@ -450,6 +452,56 @@ impl AuthStorageBackend for FileAuthStorage {
 
         let removed_fallback = delete_file_if_exists(&self.codex_home)?;
         Ok(removed_active || removed_fallback)
+    }
+
+    fn invalidate_active_account(&self) -> std::io::Result<Option<PathBuf>> {
+        let active = {
+            let guard = self.lock_active_auth_file();
+            guard.clone()
+        };
+
+        let Some(path) = active else {
+            return Ok(None);
+        };
+
+        if path.file_name() == Some(OsStr::new("auth.json")) {
+            return Ok(None);
+        }
+
+        let original_name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .ok_or_else(|| std::io::Error::other("active account file missing file name"))?;
+
+        let parent = match path.parent() {
+            Some(parent) => parent.to_path_buf(),
+            None => return Ok(None),
+        };
+
+        let mut invalid_path = parent.join(format!("invalid-{original_name}"));
+        if invalid_path.exists() {
+            let timestamp = Utc::now().format("%Y%m%d%H%M%S");
+            invalid_path = parent.join(format!("invalid-{timestamp}-{original_name}"));
+        }
+
+        match std::fs::rename(&path, &invalid_path) {
+            Ok(()) => {}
+            Err(err) if err.kind() == ErrorKind::NotFound => {
+                self.clear_active_if_matches(&path);
+                return Ok(None);
+            }
+            Err(err) => return Err(err),
+        }
+
+        self.clear_active_if_matches(&path);
+        if let Err(err) = delete_file_if_exists(&self.codex_home) {
+            warn!(
+                "failed to remove stale auth.json after invalidating account {}: {err}",
+                path.display()
+            );
+        }
+
+        Ok(Some(invalid_path))
     }
 }
 
@@ -666,6 +718,48 @@ mod tests {
     }
 
     #[test]
+    fn file_storage_invalidate_active_account_marks_file_invalid() -> anyhow::Result<()> {
+        let codex_home = tempdir()?;
+        let storage = FileAuthStorage::new(codex_home.path().to_path_buf());
+        let auth_dot_json = auth_with_prefix("alice");
+
+        <FileAuthStorage as AuthStorageBackend>::save(&storage, &auth_dot_json)?;
+
+        let auth_dir = codex_home.path().join("auth");
+        let original_path = auth_dir.join("alice@example.com.json");
+        assert!(
+            original_path.exists(),
+            "expected active account file to exist before invalidation"
+        );
+        let current_path = get_auth_file(codex_home.path());
+        assert!(
+            current_path.exists(),
+            "expected copied auth.json to exist before invalidation"
+        );
+
+        let invalid_path =
+            <FileAuthStorage as AuthStorageBackend>::invalidate_active_account(&storage)?
+                .expect("expected account file to be invalidated");
+
+        assert!(
+            !original_path.exists(),
+            "original account file should be renamed after invalidation"
+        );
+        assert!(
+            invalid_path
+                .file_name()
+                .and_then(OsStr::to_str)
+                .is_some_and(|name| name.starts_with("invalid-")),
+            "renamed account file should be prefixed with invalid-"
+        );
+        assert!(
+            !current_path.exists(),
+            "active auth.json should be removed after invalidation"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn file_storage_delete_removes_auth_file() -> anyhow::Result<()> {
         let dir = tempdir()?;
         let auth_dot_json = AuthDotJson {
@@ -820,7 +914,7 @@ mod tests {
             .expect("should load alice auth");
         assert_eq!(loaded, alice_auth);
 
-        let mut updated = loaded.clone();
+        let mut updated = loaded;
         updated.openai_api_key = Some("alice-updated".to_string());
         <FileAuthStorage as AuthStorageBackend>::save(&storage, &updated)?;
 

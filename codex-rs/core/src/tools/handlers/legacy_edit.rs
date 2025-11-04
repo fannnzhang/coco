@@ -41,7 +41,7 @@ pub(crate) fn maybe_build_apply_patch_action(
     command: &[String],
     cwd: &Path,
 ) -> Result<Option<ApplyPatchAction>, LegacyEditError> {
-    let Some(command_name) = command.first().map(|s| s.as_str()) else {
+    let Some(command_name) = command.first().map(std::string::String::as_str) else {
         return Ok(None);
     };
 
@@ -377,7 +377,7 @@ mod tests {
     use tempfile::tempdir;
 
     fn command(args: &[&str]) -> Vec<String> {
-        args.iter().map(|s| s.to_string()).collect()
+        args.iter().map(std::string::ToString::to_string).collect()
     }
 
     #[test]

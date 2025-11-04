@@ -128,10 +128,13 @@ pub fn find_family_for_model(slug: &str) -> Option<ModelFamily> {
             reasoning_summary_format: ReasoningSummaryFormat::Experimental,
             base_instructions: GPT_5_CODEX_INSTRUCTIONS.to_string(),
             experimental_supported_tools: vec![
+                "delete".to_string(),
                 "grep_files".to_string(),
                 "list_dir".to_string(),
                 "read_file".to_string(),
+                "replace".to_string(),
                 "test_sync_tool".to_string(),
+                "write_file".to_string(),
             ],
             supports_parallel_tool_calls: true,
             support_verbosity: true,

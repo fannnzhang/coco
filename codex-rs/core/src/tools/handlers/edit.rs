@@ -172,7 +172,7 @@ impl EditHandler {
                     !apply.user_explicitly_approved_this_action,
                 );
                 let event_ctx =
-                    ToolEventCtx::new(session.as_ref(), turn.as_ref(), call_id, Some(&tracker));
+                    ToolEventCtx::new(session.as_ref(), turn.as_ref(), call_id, Some(tracker));
                 emitter.begin(event_ctx).await;
 
                 let req = ApplyPatchRequest {

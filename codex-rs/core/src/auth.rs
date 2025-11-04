@@ -7,6 +7,7 @@ use serde::Serialize;
 use serial_test::serial;
 use std::env;
 use std::fmt::Debug;
+use std::fmt::{self};
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -33,6 +34,7 @@ use crate::token_data::PlanType;
 use crate::token_data::TokenData;
 use crate::token_data::parse_id_token;
 use crate::util::try_parse_error_message;
+use reqwest::StatusCode;
 use tracing::warn;
 
 #[derive(Debug, Clone)]
@@ -238,6 +240,15 @@ impl CodexAuth {
 
     fn get_current_token_data(&self) -> Option<TokenData> {
         self.get_current_auth_json().and_then(|t| t.tokens)
+    }
+
+    fn invalidate_current_account(&self) -> std::io::Result<Option<PathBuf>> {
+        let result = self.storage.invalidate_active_account()?;
+        if result.is_some()
+            && let Ok(mut guard) = self.auth_dot_json.lock() {
+                *guard = None;
+            }
+        Ok(result)
     }
 
     /// Consider this private to integration tests.
@@ -519,18 +530,19 @@ async fn try_refresh_token(
         .await
         .map_err(std::io::Error::other)?;
 
-    if response.status().is_success() {
+    let status = response.status();
+    if status.is_success() {
         let refresh_response = response
             .json::<RefreshResponse>()
             .await
             .map_err(std::io::Error::other)?;
         Ok(refresh_response)
     } else {
-        Err(std::io::Error::other(format!(
-            "Failed to refresh token: {}: {}",
-            response.status(),
-            try_parse_error_message(&response.text().await.unwrap_or_default()),
-        )))
+        let message = try_parse_error_message(&response.text().await.unwrap_or_default());
+        Err(std::io::Error::other(RefreshTokenFailure {
+            status,
+            message,
+        }))
     }
 }
 
@@ -547,6 +559,40 @@ struct RefreshResponse {
     id_token: Option<String>,
     access_token: Option<String>,
     refresh_token: Option<String>,
+}
+
+#[derive(Debug)]
+struct RefreshTokenFailure {
+    status: StatusCode,
+    message: String,
+}
+
+impl RefreshTokenFailure {
+    fn is_refresh_token_reused(&self) -> bool {
+        self.status == StatusCode::UNAUTHORIZED
+            && self
+                .message
+                .contains("Your refresh token has already been used")
+    }
+}
+
+impl fmt::Display for RefreshTokenFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Failed to refresh token: {}: {}",
+            self.status, self.message
+        )
+    }
+}
+
+impl std::error::Error for RefreshTokenFailure {}
+
+fn should_invalidate_refresh_error(error: &std::io::Error) -> bool {
+    error
+        .get_ref()
+        .and_then(|inner| inner.downcast_ref::<RefreshTokenFailure>())
+        .is_some_and(RefreshTokenFailure::is_refresh_token_reused)
 }
 
 // Shared constant for token refresh (client id used for oauth token refresh flow)
@@ -651,6 +697,30 @@ mod tests {
         assert_eq!(auth, None);
     }
 
+    #[test]
+    fn should_invalidate_refresh_error_detects_reused_refresh_token() {
+        let error = std::io::Error::other(RefreshTokenFailure {
+            status: StatusCode::UNAUTHORIZED,
+            message: "Your refresh token has already been used to generate a new access token. Please try signing in again.".to_string(),
+        });
+        assert!(
+            super::should_invalidate_refresh_error(&error),
+            "refresh token reuse should trigger invalidation"
+        );
+    }
+
+    #[test]
+    fn should_invalidate_refresh_error_ignores_other_errors() {
+        let error = std::io::Error::other(RefreshTokenFailure {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: "unexpected failure".to_string(),
+        });
+        assert!(
+            !super::should_invalidate_refresh_error(&error),
+            "non-refresh errors should not trigger invalidation"
+        );
+    }
+
     #[tokio::test]
     #[serial(codex_api_key)]
     async fn pro_account_with_no_api_key_uses_chatgpt_auth() {
@@ -747,17 +817,12 @@ mod tests {
         let storage = Arc::new(FileAuthStorage::new(dir.path().to_path_buf()));
         let auth = AuthDotJson {
             openai_api_key: None,
-            tokens: Some(TokenData {
-                id_token: Default::default(),
-                access_token: "access".to_string(),
-                refresh_token: "refresh".to_string(),
-                account_id: None,
-            }),
+            tokens: Some(token_data_for_tests()),
             last_refresh: Some(Utc::now()),
             account_state: None,
         };
         AuthStorageBackend::save(&*storage, &auth)?;
-        let storage_arc: Arc<dyn AuthStorageBackend> = storage.clone();
+        let storage_arc: Arc<dyn AuthStorageBackend> = storage;
         let codex_auth = CodexAuth {
             mode: AuthMode::ChatGPT,
             api_key: None,
@@ -794,17 +859,12 @@ mod tests {
         let storage = Arc::new(FileAuthStorage::new(dir.path().to_path_buf()));
         let auth = AuthDotJson {
             openai_api_key: None,
-            tokens: Some(TokenData {
-                id_token: Default::default(),
-                access_token: "access".to_string(),
-                refresh_token: "refresh".to_string(),
-                account_id: None,
-            }),
+            tokens: Some(token_data_for_tests()),
             last_refresh: Some(Utc::now()),
             account_state: None,
         };
         AuthStorageBackend::save(&*storage, &auth)?;
-        let storage_arc: Arc<dyn AuthStorageBackend> = storage.clone();
+        let storage_arc: Arc<dyn AuthStorageBackend> = storage;
         let codex_auth = CodexAuth {
             mode: AuthMode::ChatGPT,
             api_key: None,
@@ -840,6 +900,41 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    #[cfg(test)]
+    fn token_data_for_tests() -> TokenData {
+        use base64::Engine;
+        use serde_json::json;
+
+        #[derive(Serialize)]
+        struct Header {
+            alg: &'static str,
+            typ: &'static str,
+        }
+
+        let header = Header {
+            alg: "none",
+            typ: "JWT",
+        };
+        let payload = json!({
+            "email": "user@example.com",
+            "https://api.openai.com/auth": {
+                "chatgpt_plan_type": "plus",
+            },
+        });
+        let encode = |bytes: &[u8]| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+        let header_b64 = encode(&serde_json::to_vec(&header).expect("serialize header"));
+        let payload_b64 = encode(&serde_json::to_vec(&payload).expect("serialize payload"));
+        let signature_b64 = encode(b"sig");
+        let fake_jwt = format!("{header_b64}.{payload_b64}.{signature_b64}");
+
+        TokenData {
+            id_token: parse_id_token(&fake_jwt).expect("fake JWT should parse"),
+            access_token: "access".to_string(),
+            refresh_token: "refresh".to_string(),
+            account_id: None,
+        }
     }
 
     struct AuthFileParams {
@@ -1148,19 +1243,55 @@ impl AuthManager {
     /// Attempt to refresh the current auth token (if any). On success, reload
     /// the auth state from disk so other components observe refreshed token.
     pub async fn refresh_token(&self) -> std::io::Result<Option<String>> {
-        let auth = match self.auth() {
-            Some(a) => a,
-            None => return Ok(None),
-        };
-        match auth.refresh_token().await {
-            Ok(token) => {
-                // Reload to pick up persisted changes.
-                self.reload();
-                Ok(Some(token))
-            }
-            Err(e) => {
-                tracing::error!("Failed to refresh token: {}", e);
-                Err(e)
+        let mut last_failure: Option<std::io::Error> = None;
+
+        loop {
+            let auth = match self.auth() {
+                Some(a) => a,
+                None => {
+                    if let Some(err) = last_failure.take() {
+                        return Err(err);
+                    }
+                    return Ok(None);
+                }
+            };
+
+            match auth.refresh_token().await {
+                Ok(token) => {
+                    // Reload to pick up persisted changes.
+                    self.reload();
+                    return Ok(Some(token));
+                }
+                Err(err) => {
+                    tracing::error!("Failed to refresh token: {}", err);
+
+                    if should_invalidate_refresh_error(&err) {
+                        match auth.invalidate_current_account() {
+                            Ok(Some(path)) => {
+                                tracing::warn!(
+                                    "Marked account {} as invalid after refresh failure",
+                                    path.display()
+                                );
+                                self.reload();
+                                last_failure = Some(err);
+                                continue;
+                            }
+                            Ok(None) => {
+                                tracing::warn!(
+                                    "Refresh token failure requested account rotation but no active account file was found"
+                                );
+                            }
+                            Err(invalidate_err) => {
+                                tracing::warn!(
+                                    "Failed to mark account invalid after refresh failure: {}",
+                                    invalidate_err
+                                );
+                            }
+                        }
+                    }
+
+                    return Err(err);
+                }
             }
         }
     }

@@ -6,6 +6,7 @@
 
 mod cli;
 mod event_processor;
+mod event_processor_last_only;
 mod event_processor_with_human_output;
 pub mod event_processor_with_jsonl_output;
 pub mod exec_events;
@@ -27,6 +28,7 @@ use codex_core::protocol::SessionSource;
 use codex_ollama::DEFAULT_OSS_MODEL;
 use codex_protocol::config_types::SandboxMode;
 use codex_protocol::user_input::UserInput;
+use event_processor_last_only::EventProcessorLastOnly;
 use event_processor_with_human_output::EventProcessorWithHumanOutput;
 use event_processor_with_jsonl_output::EventProcessorWithJsonOutput;
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
@@ -63,8 +65,9 @@ pub async fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> any
         cwd,
         skip_git_repo_check,
         color,
-        last_message_file,
         json: json_mode,
+        last_only,
+        last_message_file,
         sandbox_mode: sandbox_mode_cli_arg,
         prompt,
         output_schema: output_schema_path,
@@ -222,9 +225,10 @@ pub async fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> any
         let _ = tracing_subscriber::registry().with(fmt_layer).try_init();
     }
 
-    let mut event_processor: Box<dyn EventProcessor> = match json_mode {
-        true => Box::new(EventProcessorWithJsonOutput::new(last_message_file.clone())),
-        _ => Box::new(EventProcessorWithHumanOutput::create_with_ansi(
+    let mut event_processor: Box<dyn EventProcessor> = match (json_mode, last_only) {
+        (true, _) => Box::new(EventProcessorWithJsonOutput::new(last_message_file.clone())),
+        (false, true) => Box::new(EventProcessorLastOnly::new(last_message_file.clone())),
+        (false, false) => Box::new(EventProcessorWithHumanOutput::create_with_ansi(
             stdout_with_ansi,
             &config,
             last_message_file.clone(),

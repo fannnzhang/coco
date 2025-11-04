@@ -67,6 +67,10 @@ pub struct Cli {
     #[arg(long = "json", alias = "experimental-json", default_value_t = false)]
     pub json: bool,
 
+    /// Only emit the final agent message.
+    #[arg(long = "last", default_value_t = false, conflicts_with = "json")]
+    pub last_only: bool,
+
     /// Specifies file where the last message from the agent should be written.
     #[arg(long = "output-last-message", short = 'o', value_name = "FILE")]
     pub last_message_file: Option<PathBuf>,

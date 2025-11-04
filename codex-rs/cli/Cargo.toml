@@ -1,10 +1,10 @@
 [package]
 edition = "2024"
-name = "coco-cli"
+name = "cocos"
 version = { workspace = true }
 
 [[bin]]
-name = "coco"
+name = "cocos"
 path = "src/main.rs"
 
 [lib]

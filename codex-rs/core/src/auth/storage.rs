@@ -85,7 +85,7 @@ pub enum AccountIssue {
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct UsageLimitStatus {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub plan_type: Option<PlanType>,
+    pub(crate) plan_type: Option<PlanType>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resets_at: Option<DateTime<Utc>>,
     pub recorded_at: DateTime<Utc>,

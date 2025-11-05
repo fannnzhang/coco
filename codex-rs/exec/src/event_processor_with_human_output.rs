@@ -10,6 +10,8 @@ use codex_core::protocol::Event;
 use codex_core::protocol::EventMsg;
 use codex_core::protocol::ExecCommandBeginEvent;
 use codex_core::protocol::ExecCommandEndEvent;
+use codex_core::protocol::ExecCommandOutputDeltaEvent;
+use codex_core::protocol::ExecOutputStream;
 use codex_core::protocol::FileChange;
 use codex_core::protocol::McpInvocation;
 use codex_core::protocol::McpToolCallBeginEvent;
@@ -28,6 +30,7 @@ use owo_colors::OwoColorize;
 use owo_colors::Style;
 use shlex::try_join;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -43,6 +46,7 @@ use codex_protocol::plan_tool::UpdatePlanArgs;
 const MAX_OUTPUT_LINES_FOR_EXEC_TOOL_CALL: usize = 20;
 pub(crate) struct EventProcessorWithHumanOutput {
     call_id_to_patch: HashMap<String, PatchApplyBegin>,
+    streaming_exec_calls: HashSet<String>,
 
     // To ensure that --color=never is respected, ANSI escapes _must_ be added
     // using .style() with one of these fields. If you need a new style, add a
@@ -76,6 +80,7 @@ impl EventProcessorWithHumanOutput {
         if with_ansi {
             Self {
                 call_id_to_patch,
+                streaming_exec_calls: HashSet::new(),
                 bold: Style::new().bold(),
                 italic: Style::new().italic(),
                 dimmed: Style::new().dimmed(),
@@ -93,6 +98,7 @@ impl EventProcessorWithHumanOutput {
         } else {
             Self {
                 call_id_to_patch,
+                streaming_exec_calls: HashSet::new(),
                 bold: Style::new(),
                 italic: Style::new(),
                 dimmed: Style::new(),
@@ -237,12 +243,31 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                     cwd.to_string_lossy(),
                 );
             }
+            EventMsg::ExecCommandOutputDelta(ExecCommandOutputDeltaEvent {
+                call_id,
+                chunk,
+                stream,
+                ..
+            }) => {
+                self.streaming_exec_calls.insert(call_id);
+                let text = String::from_utf8_lossy(&chunk).into_owned();
+                match stream {
+                    ExecOutputStream::Stdout => {
+                        eprint!("{text}");
+                    }
+                    ExecOutputStream::Stderr => {
+                        eprint!("{}", text.style(self.red));
+                    }
+                }
+            }
             EventMsg::ExecCommandEnd(ExecCommandEndEvent {
+                call_id,
                 aggregated_output,
                 duration,
                 exit_code,
                 ..
             }) => {
+                let used_streaming = self.streaming_exec_calls.remove(&call_id);
                 let duration = format!(" in {}", format_duration(duration));
 
                 let truncated_output = aggregated_output
@@ -260,7 +285,9 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                         ts_msg!(self, "{}", title.style(self.red));
                     }
                 }
-                eprintln!("{}", truncated_output.style(self.dimmed));
+                if !used_streaming {
+                    eprintln!("{}", truncated_output.style(self.dimmed));
+                }
             }
             EventMsg::McpToolCallBegin(McpToolCallBeginEvent {
                 call_id: _,
@@ -517,7 +544,6 @@ impl EventProcessor for EventProcessorWithHumanOutput {
             EventMsg::WebSearchBegin(_)
             | EventMsg::ExecApprovalRequest(_)
             | EventMsg::ApplyPatchApprovalRequest(_)
-            | EventMsg::ExecCommandOutputDelta(_)
             | EventMsg::GetHistoryEntryResponse(_)
             | EventMsg::McpListToolsResponse(_)
             | EventMsg::ListCustomPromptsResponse(_)

@@ -10,6 +10,7 @@ use crate::codex::TurnContext;
 use crate::exec::ExecParams;
 use crate::exec_env::create_env;
 use crate::function_tool::FunctionCallError;
+use crate::tools::coco_subagent;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
@@ -125,6 +126,18 @@ impl ShellHandler {
                 "approval policy is {policy:?}; reject command — you should not ask for escalated permissions if the approval policy is {policy:?}",
                 policy = turn.approval_policy
             )));
+        }
+
+        if let Some(output) = coco_subagent::maybe_run_coco_command(
+            &exec_params,
+            &session,
+            &turn,
+            &call_id,
+            is_user_shell_command,
+        )
+        .await?
+        {
+            return Ok(output);
         }
 
         // Intercept apply_patch if present.

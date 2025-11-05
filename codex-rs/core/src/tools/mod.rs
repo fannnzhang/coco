@@ -1,3 +1,4 @@
+pub(crate) mod coco_subagent;
 pub mod context;
 pub mod events;
 pub(crate) mod handlers;

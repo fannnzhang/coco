@@ -174,7 +174,7 @@ pub fn find_family_for_model(slug: &str) -> Option<ModelFamily> {
             needs_special_apply_patch_instructions: true,
             support_verbosity: true,
         )
-    } else if slug.starts_with("qwen") || slug.starts_with("deepseek") {
+    } else {
         model_family!(
             slug, slug,
             supports_reasoning_summaries: true,
@@ -189,8 +189,6 @@ pub fn find_family_for_model(slug: &str) -> Option<ModelFamily> {
             ],
             supports_parallel_tool_calls: true,
         )
-    } else {
-        None
     }
 }
 

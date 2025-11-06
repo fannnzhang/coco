@@ -21,6 +21,7 @@ use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
+use tracing::{info, warn};
 
 pub struct EditHandler;
 
@@ -78,22 +79,53 @@ impl ToolHandler for EditHandler {
         };
 
         let cwd = turn.cwd.clone();
+        let mut target_path: Option<String> = None;
         let action = match tool_name.as_str() {
             "write_file" => {
                 let params: WriteFileToolArgs =
                     serde_json::from_str(&arguments).map_err(|err| {
+                        warn!(
+                            tool = "write_file",
+                            %call_id,
+                            error = ?err,
+                            "failed to parse write_file arguments"
+                        );
                         FunctionCallError::RespondToModel(format!(
                             "write_file arguments could not be parsed as JSON: {err}"
                         ))
                     })?;
+                info!(
+                    tool = "write_file",
+                    %call_id,
+                    path = %params.file_path,
+                    content_bytes = params.content.len(),
+                    "write_file invocation received"
+                );
+                target_path = Some(params.file_path.clone());
                 build_write_file_action(&params.file_path, &params.content, &cwd)?
             }
             "replace" => {
                 let params: ReplaceToolArgs = serde_json::from_str(&arguments).map_err(|err| {
+                    warn!(
+                        tool = "replace",
+                        %call_id,
+                        error = ?err,
+                        "failed to parse replace arguments"
+                    );
                     FunctionCallError::RespondToModel(format!(
                         "replace arguments could not be parsed as JSON: {err}"
                     ))
                 })?;
+                info!(
+                    tool = "replace",
+                    %call_id,
+                    path = %params.file_path,
+                    old_bytes = params.old_string.len(),
+                    new_bytes = params.new_string.len(),
+                    expected_replacements = ?params.expected_replacements,
+                    "replace invocation received"
+                );
+                target_path = Some(params.file_path.clone());
                 build_replace_action(
                     &params.file_path,
                     &params.old_string,
@@ -105,21 +137,55 @@ impl ToolHandler for EditHandler {
             "delete" => {
                 let params: DeleteFileToolArgs =
                     serde_json::from_str(&arguments).map_err(|err| {
+                        warn!(
+                            tool = "delete",
+                            %call_id,
+                            error = ?err,
+                            "failed to parse delete arguments"
+                        );
                         FunctionCallError::RespondToModel(format!(
                             "delete arguments could not be parsed as JSON: {err}"
                         ))
                     })?;
+                info!(
+                    tool = "delete",
+                    %call_id,
+                    path = %params.file_path,
+                    "delete invocation received"
+                );
+                target_path = Some(params.file_path.clone());
                 build_delete_action(&params.file_path, &cwd)?
             }
             other => {
+                warn!(tool = %other, %call_id, "unsupported edit tool");
                 return Err(FunctionCallError::Fatal(format!(
                     "unsupported edit tool {other}"
                 )));
             }
         };
 
-        Self::execute_apply_patch_action(&tool_name, action, &session, &turn, &tracker, &call_id)
-            .await
+        let result = Self::execute_apply_patch_action(
+            &tool_name, action, &session, &turn, &tracker, &call_id,
+        )
+        .await;
+
+        match &result {
+            Ok(_) => info!(
+                tool = %tool_name,
+                %call_id,
+                path = target_path.as_deref(),
+                "edit tool completed successfully"
+            ),
+            Err(err) => warn!(
+                tool = %tool_name,
+                %call_id,
+                path = target_path.as_deref(),
+                error = ?err,
+                "edit tool failed"
+            ),
+        }
+
+        result
     }
 }
 

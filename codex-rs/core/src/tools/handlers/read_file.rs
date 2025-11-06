@@ -4,6 +4,8 @@ use std::path::PathBuf;
 use async_trait::async_trait;
 use codex_utils_string::take_bytes_at_char_boundary;
 use serde::Deserialize;
+use tracing::info;
+use tracing::warn;
 
 use crate::function_tool::FunctionCallError;
 use crate::tools::context::ToolInvocation;
@@ -39,7 +41,7 @@ struct ReadFileArgs {
     indentation: Option<IndentationArgs>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum ReadMode {
     Slice,
@@ -122,12 +124,24 @@ impl ToolHandler for ReadFileHandler {
         } = args;
 
         if offset == 0 {
+            warn!(
+                tool = "read_file",
+                %file_path,
+                offset,
+                "invalid read_file offset"
+            );
             return Err(FunctionCallError::RespondToModel(
                 "offset must be a 1-indexed line number".to_string(),
             ));
         }
 
         if limit == 0 {
+            warn!(
+                tool = "read_file",
+                %file_path,
+                limit,
+                "invalid read_file limit"
+            );
             return Err(FunctionCallError::RespondToModel(
                 "limit must be greater than zero".to_string(),
             ));
@@ -135,10 +149,25 @@ impl ToolHandler for ReadFileHandler {
 
         let path = PathBuf::from(&file_path);
         if !path.is_absolute() {
+            warn!(
+                tool = "read_file",
+                %file_path,
+                "non-absolute read_file path"
+            );
             return Err(FunctionCallError::RespondToModel(
                 "file_path must be an absolute path".to_string(),
             ));
         }
+
+        info!(
+            tool = "read_file",
+            %file_path,
+            offset,
+            limit,
+            mode = ?mode,
+            has_indentation_args = indentation.is_some(),
+            "read_file invocation received"
+        );
 
         let collected = match mode {
             ReadMode::Slice => slice::read(&path, offset, limit).await?,
@@ -147,6 +176,12 @@ impl ToolHandler for ReadFileHandler {
                 indentation::read_block(&path, offset, limit, indentation).await?
             }
         };
+        info!(
+            tool = "read_file",
+            %file_path,
+            returned_lines = collected.len(),
+            "read_file completed successfully"
+        );
         Ok(ToolOutput::Function {
             content: collected.join("\n"),
             content_items: None,

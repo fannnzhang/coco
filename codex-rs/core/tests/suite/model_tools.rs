@@ -129,4 +129,40 @@ async fn model_selects_expected_tools() {
         ],
         "gpt-5-codex should expose the apply_patch tool",
     );
+
+    let qwen_tools = collect_tool_identifiers_for_model("qwen-test-model").await;
+    assert_eq!(
+        qwen_tools,
+        vec![
+            "shell".to_string(),
+            "list_mcp_resources".to_string(),
+            "list_mcp_resource_templates".to_string(),
+            "read_mcp_resource".to_string(),
+            "update_plan".to_string(),
+            "apply_patch".to_string(),
+            "read_file".to_string(),
+            "write_file".to_string(),
+            "replace".to_string(),
+            "delete".to_string()
+        ],
+        "qwen models should expose read/write/replace/delete tools",
+    );
+
+    let deepseek_tools = collect_tool_identifiers_for_model("deepseek-test-model").await;
+    assert_eq!(
+        deepseek_tools,
+        vec![
+            "shell".to_string(),
+            "list_mcp_resources".to_string(),
+            "list_mcp_resource_templates".to_string(),
+            "read_mcp_resource".to_string(),
+            "update_plan".to_string(),
+            "apply_patch".to_string(),
+            "read_file".to_string(),
+            "write_file".to_string(),
+            "replace".to_string(),
+            "delete".to_string()
+        ],
+        "deepseek models should expose read/write/replace/delete tools",
+    );
 }

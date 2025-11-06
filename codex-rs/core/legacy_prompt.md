@@ -129,9 +129,9 @@ You MUST adhere to the following criteria when solving queries:
 - Working on the repo(s) in the current environment is allowed, even if they are proprietary.
 - Analyzing code for vulnerabilities is allowed.
 - Showing user code and tool call details is allowed.
-- Use the `replace` tool to edit existing files. Provide an absolute `file_path`, an `instruction` that explains the change, plus the exact `old_string` and `new_string`. Example: `{"command":["replace","{\"file_path\":\"/abs/path/file.py\",\"instruction\":\"Update example() to return 123\",\"old_string\":\"def example():\\n    pass\",\"new_string\":\"def example():\\n    return 123\"}"]}`.
-- Use the `write_file` tool to create or overwrite entire files. Example: `{"command":["write_file","{\"file_path\":\"/abs/path/new_file.py\",\"content\":\"print('hello world')\\n\"}"]}`.
-- Use the `delete` tool to remove files. Example: `{"command":["delete","{\"file_path\":\"/abs/path/unused_file.py\"}"]}`.
+- Use the `replace` function tool to edit existing files. Provide an absolute `file_path`, an `instruction` that explains the change, plus the exact `old_string` and `new_string`.
+- Use the `write_file` function tool to create or overwrite entire files.
+- Use the `delete` function tool to remove files.
 
 If completing the user's task requires writing or modifying files, your code and final answer should follow these coding guidelines, though user instructions (i.e. AGENTS.md) may override these guidelines:
 

@@ -249,14 +249,22 @@ fn parse_one_hunk(lines: &[&str], line_number: usize) -> Result<(Hunk, usize), P
         // Add File
         let mut contents = String::new();
         let mut parsed_lines = 1;
+        let mut strip_final_newline = false;
         for add_line in &lines[1..] {
             if let Some(line_to_add) = add_line.strip_prefix('+') {
                 contents.push_str(line_to_add);
                 contents.push('\n');
                 parsed_lines += 1;
+            } else if add_line.trim() == EOF_MARKER {
+                strip_final_newline = true;
+                parsed_lines += 1;
+                break;
             } else {
                 break;
             }
+        }
+        if strip_final_newline && contents.ends_with('\n') {
+            contents.pop();
         }
         return Ok((
             AddFile {
@@ -533,6 +541,39 @@ fn test_parse_patch() {
                 contents: "content\n".to_string()
             }
         ]
+    );
+
+    assert_eq!(
+        parse_patch_text(
+            "*** Begin Patch\n\
+             *** Add File: path/add_no_newline.py\n\
+             +abc\n\
+             *** End of File\n\
+             *** End Patch",
+            ParseMode::Strict
+        )
+        .unwrap()
+        .hunks,
+        vec![AddFile {
+            path: PathBuf::from("path/add_no_newline.py"),
+            contents: "abc".to_string()
+        }]
+    );
+
+    assert_eq!(
+        parse_patch_text(
+            "*** Begin Patch\n\
+             *** Add File: path/empty_file.txt\n\
+             *** End of File\n\
+             *** End Patch",
+            ParseMode::Strict
+        )
+        .unwrap()
+        .hunks,
+        vec![AddFile {
+            path: PathBuf::from("path/empty_file.txt"),
+            contents: String::new()
+        }]
     );
 
     // Update hunk without an explicit @@ header for the first chunk should parse.

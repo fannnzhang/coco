@@ -1206,6 +1206,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-flow"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "clap_complete",
+ "codex-exec",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "textwrap 0.16.2",
+ "toml",
+ "walkdir",
+]
+
+[[package]]
 name = "codex-git"
 version = "0.53.0"
 dependencies = [

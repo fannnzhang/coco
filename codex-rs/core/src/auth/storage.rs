@@ -330,10 +330,7 @@ fn is_email_auth_candidate(path: &Path) -> bool {
     if path.file_name() == Some(OsStr::new("auth.json")) {
         return false;
     }
-    if path
-        .extension()
-        .and_then(OsStr::to_str) != Some("json")
-    {
+    if path.extension().and_then(OsStr::to_str) != Some("json") {
         return false;
     }
     path.file_stem()

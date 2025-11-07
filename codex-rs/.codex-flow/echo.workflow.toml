@@ -1,0 +1,13 @@
+[defaults]
+engine = "codex"
+mock = false
+
+[agents.echo]
+prompt = ".codex-flow/prompts/echo.md"
+
+[workflow]
+description = "Run a single echo command through codex"
+
+  [[workflow.steps]]
+  agent = "echo"
+  description = "echo"

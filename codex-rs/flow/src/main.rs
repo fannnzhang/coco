@@ -36,7 +36,7 @@ struct InitArgs {
     #[arg(long)]
     force: bool,
 
-    /// Templates source directory (default: CodeMachine-CLI/prompts/templates)
+    /// Templates source directory (default: embedded prompts bundled in the binary)
     #[arg(long, value_name = "DIR")]
     templates_dir: Option<PathBuf>,
 }
@@ -64,10 +64,8 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::Init(args) => {
             let dir = args.dir.unwrap_or(std::env::current_dir()?);
-            let templates = args
-                .templates_dir
-                .unwrap_or_else(|| PathBuf::from("CodeMachine-CLI/prompts/templates"));
-            scaffold::init_scaffold(&dir, &templates, args.force)?;
+            let templates = args.templates_dir.as_deref();
+            scaffold::init_scaffold(&dir, templates, args.force)?;
         }
         Commands::Run(args) => {
             let verbose = args.verbose;

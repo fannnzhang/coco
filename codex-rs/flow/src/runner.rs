@@ -167,16 +167,20 @@ fn create_step_paths(step_index: usize, _step: &StepSpec, agent_id: &str) -> Res
     let slug = sanitize_label(agent_id);
     let stem = format!("{:02}-{slug}-agent", step_index + 1, slug = slug);
 
-    // JSON event logs now go under .codex-flow/debug to avoid polluting memory context
-    let memory_dir = Path::new(".codex-flow").join("debug");
+    // All runtime artifacts live under .codex-flow/runtime to keep the workspace tidy
+    let runtime_root = Path::new(".codex-flow").join("runtime");
+    fs::create_dir_all(&runtime_root)
+        .with_context(|| format!("failed to create runtime dir {}", runtime_root.display()))?;
+
+    let memory_dir = runtime_root.join("debug");
     fs::create_dir_all(&memory_dir)
         .with_context(|| format!("failed to create debug dir {}", memory_dir.display()))?;
 
-    let logs_dir = Path::new(".codex-flow").join("logs");
+    let logs_dir = runtime_root.join("logs");
     fs::create_dir_all(&logs_dir)
         .with_context(|| format!("failed to create logs dir {}", logs_dir.display()))?;
 
-    let memory_md_dir = Path::new(".codex-flow").join("memory");
+    let memory_md_dir = runtime_root.join("memory");
     fs::create_dir_all(&memory_md_dir)
         .with_context(|| format!("failed to create memory dir {}", memory_md_dir.display()))?;
 

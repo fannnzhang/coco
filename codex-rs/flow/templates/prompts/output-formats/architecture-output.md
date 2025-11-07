@@ -62,10 +62,10 @@ The manifest MUST contain a root object with a key `locations`, which is an arra
 
 ### **3. Output Directory**
 
-**All generated files** (the `.md` content files and the `architecture_manifest.json`) MUST be created inside the following directory: `.codemachine/artifacts/architecture/`.
+**All generated files** (the `.md` content files and the `architecture_manifest.json`) MUST be created inside the following directory: `.codex-flow/artifacts/architecture/`.
 
 **Example final file paths:**
-*   `.codemachine/artifacts/architecture/01_Context_and_Drivers.md`
-*   `.codemachine/artifacts/architecture/02_Architecture_Overview.md`
+*   `.codex-flow/artifacts/architecture/01_Context_and_Drivers.md`
+*   `.codex-flow/artifacts/architecture/02_Architecture_Overview.md`
 *   ...etc.
-*   `.codemachine/artifacts/architecture/architecture_manifest.json`
+*   `.codex-flow/artifacts/architecture/architecture_manifest.json`

@@ -38,7 +38,7 @@
 - 映射关系：
   - JS 模板中的 agent 与 step 用代码描述；本方案用 TOML 的 `[agents.*]` 和 `[[workflow.steps]]` 描述。
   - JS 中按序执行的 steps 对应 TOML 中的 `workflow.steps` 顺序数组。
-  - Prompt 模板路径直接复用 `CodeMachine-CLI/prompts/templates/...`，在 `init` 时复制到 `.codex-flow/prompts/`。
+  - Prompt 模板路径默认指向 `.codex-flow/prompts/...`，`init` 会把编译进二进制的模板落盘到该目录。
   - 后续可扩展 step 的输入/输出/控制字段以覆盖更多 JS 模板能力。
 
 ## 配置设计（TOML）
@@ -94,7 +94,7 @@ description = "从 git diff 生成提交信息"
 说明：
 - `agents.<id>`：定义单个 Agent。至少包含 `prompt`，建议包含 `engine`、`model`。
 - `workflow.steps`：数组表，按序执行。每个 step 的 `agent` 对应一个 agent id。
-- `workflow.steps[*].description`：可选的人类可读描述，用于 CLI 输出与 `.codex-flow/debug/` JSON 日志文件命名；留空时退回到 `agent` 名称。
+- `workflow.steps[*].description`：可选的人类可读描述，用于 CLI 输出与 `.codex-flow/runtime/debug/` JSON 日志文件命名；留空时退回到 `agent` 名称。
 - 覆盖：在 step 上书写 `engine`/`model`/`prompt` 字段可覆盖引用的 agent 默认值。
 - Mock 执行：仅打印 Shell 命令（不读取 `input`/`output`）。
 - 真实执行（规划中）：`input` 参与渲染，`output` 决定落盘位置。
@@ -104,7 +104,7 @@ description = "从 git diff 生成提交信息"
 ## Prompt 与模板来源
 
 - 初始化时将把默认模板复制到目标工程 `.codex-flow/prompts/` 下。
-- 首期直接复用本仓库 `CodeMachine-CLI/prompts/templates/` 下的 Markdown 模板，按原目录结构拷贝：
+- 首期直接复用仓库 `.codex-flow/prompts/` 下的 Markdown 模板（编译进二进制），按原目录结构拷贝：
   - `codemachine/agents/*`
   - `codemachine/workflows/*`
   - `codemachine/output-formats/*`
@@ -115,13 +115,13 @@ description = "从 git diff 生成提交信息"
 
 - `codex-flow init [--dir <path>]`
   - 若未指定 `--dir`，默认在当前项目根下创建 `.codex-flow/`。
-  - 生成：`.codex-flow/flow.toml`、`.codex-flow/prompts/`（复制自 `CodeMachine-CLI/prompts/templates/`）。
+- 生成：`.codex-flow/flow.toml`、`.codex-flow/prompts/`（复制自内置模板，除非通过 `--templates-dir` 指定其它目录）。
   - 不覆盖已存在文件，除非 `--force`。
 
 - `codex-flow run <workflow.toml> [--mock | --no-mock] [--verbose]`
   - 解析单个工作流文件（TOML），逐步执行 `workflow.steps`。
   - `--mock` 为无参开关，显式开启 Mock；`--no-mock` 关闭 Mock（二者互斥）。若均未指定则回退到配置文件的 `defaults.mock` 或内建默认值。
-  - Mock（默认开启，除非 `--no-mock` 或配置中明确关闭）：不调用真实模型，而是读取 `.codex-flow/debug/{index}-{step}.json` 中的历史事件，并以每秒一行 JSON 的节奏回放，将事件交给 human renderer 解析展示，进而模拟真实 `codex exec --json` 的流式输出。
+  - Mock（默认开启，除非 `--no-mock` 或配置中明确关闭）：不调用真实模型，而是读取 `.codex-flow/runtime/debug/{index}-{step}.json` 中的历史事件，并以每秒一行 JSON 的节奏回放，将事件交给 human renderer 解析展示，进而模拟真实 `codex exec --json` 的流式输出。
   - 真实模式：按引擎适配器真正执行。对 `codex` 引擎会自动启用 `codex exec --json`，无需额外 CLI 选项。
 
 ## 执行与输出管控（真实模式雏形）
@@ -136,10 +136,10 @@ description = "从 git diff 生成提交信息"
 - **人类可读展示**：基于 JSON 事件做流式渲染，复用 `codex exec` 的输出风格（命令启动、增量输出、最终消息），保证用户在 shell 中能实时看到执行进度，而不是在任务结束后一次性刷屏。
 - **步骤结果记录**：runner 会跟踪每个 step 的退出状态；若进程失败将立即中止，并保留事件日志便于事后排查。
 - **执行日志落盘**：
-  - 流式事件：每个真实步骤将 codex `--json` 事件实时写入 `.codex-flow/debug/{index}-{agent}-agent.json`，便于回放与调试；同时，人类可见的 shell 输出会被追加到 `.codex-flow/logs/{index}-{agent}-agent.log`。
-  - 最终结果（Memory）：利用 `codex exec` 原生的 `-o <file>` 选项，将该 Agent 的“最后一条消息”落盘为 Markdown，总结文件写入 `.codex-flow/memory/{index}-{agent}-agent-result.md`，供后续作为更有价值、言简意赅的 Memory 资料复用到上下文中。Mock 模式下会在回放完成后，根据最后一个 `agent_message` 事件同样生成该 Markdown 文件。
+  - 流式事件：每个真实步骤将 codex `--json` 事件实时写入 `.codex-flow/runtime/debug/{index}-{agent}-agent.json`，便于回放与调试；同时，人类可见的 shell 输出会被追加到 `.codex-flow/runtime/logs/{index}-{agent}-agent.log`。
+  - 最终结果（Memory）：利用 `codex exec` 原生的 `-o <file>` 选项，将该 Agent 的“最后一条消息”落盘为 Markdown，总结文件写入 `.codex-flow/runtime/memory/{index}-{agent}-agent-result.md`，供后续作为更有价值、言简意赅的 Memory 资料复用到上下文中。Mock 模式下会在回放完成后，根据最后一个 `agent_message` 事件同样生成该 Markdown 文件。
 
-  - 说明：`.codex-flow/memory/` 目录后续将用于存放更有价值、言简意赅的 Markdown 记忆文档（供上下文复用）；为避免 JSON 事件污染上下文，JSON 回放日志统一迁移到 `.codex-flow/debug/`。
+  - 说明：`.codex-flow/runtime/memory/` 目录后续将用于存放更有价值、言简意赅的 Markdown 记忆文档（供上下文复用）；为避免 JSON 事件污染上下文，JSON 回放日志统一迁移到 `.codex-flow/runtime/debug/`。
 
 ## 引擎抽象与适配
 
@@ -154,8 +154,8 @@ trait Engine {
 
 - MockEngine：
   - 不进行任何网络调用。
-  - 每个 step 会按 `{index}-{slug}.json` 的命名约定在 `.codex-flow/debug/` 下寻找日志文件，`slug` 来源于 `description`（若为空则回退到 agent 名）。
-  - 每个 step 同时会生成 `.codex-flow/memory/{index}-{slug}-agent-result.md` 的 Markdown 结果文件。
+- 每个 step 会按 `{index}-{slug}.json` 的命名约定在 `.codex-flow/runtime/debug/` 下寻找日志文件，`slug` 来源于 `description`（若为空则回退到 agent 名）。
+- 每个 step 同时会生成 `.codex-flow/runtime/memory/{index}-{slug}-agent-result.md` 的 Markdown 结果文件。
   - 找到日志后逐行读取 JSON 事件（忽略非 JSON 行），并在事件之间按 1 秒的节奏发送给 HumanEventRenderer，从而复刻真实 `codex exec --json` 的流式体验。
   - 如果对应日志不存在或为空，则直接报错，提示先以真实模式运行一次来生成 memory。
   - 回放得到的 JSON 不直接原样输出，而是交由统一的 HumanEventRenderer（`human_output` 层）消费，这样上层展示逻辑无需感知底层使用真实 engine 还是 mock replay。
@@ -177,7 +177,7 @@ trait Engine {
 
 ## 初始化策略（Scaffold）
 
-- 复制模板：将 `CodeMachine-CLI/prompts/templates/` 的内容拷贝到 `.codex-flow/prompts/`。
+- 复制模板：将编译进二进制的模板写入 `.codex-flow/prompts/`（或按 `--templates-dir` 自定义来源）。
 - 生成基础配置：
 
 ```toml

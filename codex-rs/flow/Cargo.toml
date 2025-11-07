@@ -9,6 +9,9 @@ clap = { workspace = true, features = ["derive"] }
 clap_complete = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+codex-protocol = { workspace = true }
+owo-colors = { workspace = true }
+supports-color = { workspace = true }
 toml = { workspace = true }
 walkdir = { workspace = true }
 textwrap = { workspace = true }

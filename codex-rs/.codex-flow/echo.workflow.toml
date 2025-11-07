@@ -8,6 +8,6 @@ prompt = ".codex-flow/prompts/echo.md"
 [workflow]
 description = "Run a single echo command through codex"
 
-  [[workflow.steps]]
-  agent = "echo"
-  description = "echo"
+[[workflow.steps]]
+agent = "echo"
+description = "echo"

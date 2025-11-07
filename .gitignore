@@ -82,3 +82,6 @@ CHANGELOG.ignore.md
 # nix related
 .direnv
 .envrc
+
+gemini-cli/
+CodeMachine-Cli/

@@ -461,7 +461,7 @@ fn strip_ansi_codes(text: &str) -> Cow<'_, str> {
                 match next {
                     '[' => {
                         chars.next();
-                        while let Some(c) = chars.next() {
+                        for c in chars.by_ref() {
                             if ('@'..='~').contains(&c) {
                                 break;
                             }
@@ -474,11 +474,11 @@ fn strip_ansi_codes(text: &str) -> Cow<'_, str> {
                             if c == '\x07' {
                                 break;
                             }
-                            if c == '\x1b' {
-                                if let Some('\\') = chars.peek().copied() {
-                                    chars.next();
-                                    break;
-                                }
+                            if c == '\x1b'
+                                && let Some('\\') = chars.peek().copied()
+                            {
+                                chars.next();
+                                break;
                             }
                         }
                         continue;

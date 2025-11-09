@@ -3,6 +3,7 @@ use std::path::Path;
 
 use anyhow::Context;
 use anyhow::Result;
+use include_dir::DirEntry;
 use include_dir::include_dir;
 use walkdir::WalkDir;
 
@@ -16,6 +17,8 @@ mock = true
 engine = "codex"
 model = "gpt-5"
 prompt = ".codex-flow/prompts/workflows/git-commit-workflow.md"
+reasoning_effort = "medium"
+reasoning_summary = "auto"
 
 [workflow]
 description = "从 git diff 生成提交信息"
@@ -98,17 +101,68 @@ fn copy_dir(src: &Path, dst: &Path, force: bool) -> Result<()> {
 }
 
 fn copy_embedded_templates(dst: &Path, force: bool) -> Result<()> {
-    for file in EMBEDDED_PROMPTS.files() {
-        let target_path = dst.join(file.path());
-        if target_path.exists() && !force {
-            continue;
+    copy_embedded_dir(&EMBEDDED_PROMPTS, dst, force)
+}
+
+fn copy_embedded_dir(dir: &include_dir::Dir<'_>, dst: &Path, force: bool) -> Result<()> {
+    for entry in dir.entries() {
+        match entry {
+            DirEntry::Dir(subdir) => {
+                let dir_path = dst.join(subdir.path());
+                fs::create_dir_all(&dir_path)
+                    .with_context(|| format!("failed to create dir {}", dir_path.display()))?;
+                copy_embedded_dir(subdir, dst, force)?;
+            }
+            DirEntry::File(file) => {
+                let target_path = dst.join(file.path());
+                if target_path.exists() && !force {
+                    continue;
+                }
+                if let Some(parent) = target_path.parent() {
+                    fs::create_dir_all(parent)
+                        .with_context(|| format!("failed to create dir {}", parent.display()))?;
+                }
+                fs::write(&target_path, file.contents())
+                    .with_context(|| format!("failed to write {}", target_path.display()))?;
+            }
         }
-        if let Some(parent) = target_path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create dir {}", parent.display()))?;
-        }
-        fs::write(&target_path, file.contents())
-            .with_context(|| format!("failed to write {}", target_path.display()))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn copies_embedded_prompts_recursively() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dst = tmp.path().join("prompts");
+        fs::create_dir_all(&dst).unwrap();
+
+        copy_embedded_templates(&dst, false).unwrap();
+
+        assert!(dst.join("workflows/git-commit-workflow.md").exists());
+        assert!(
+            dst.join("sub-agents/shared-instructions/atomic-generation.md")
+                .exists()
+        );
+    }
+
+    #[test]
+    fn respects_force_flag_when_copying_embedded_prompts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dst = tmp.path().join("prompts");
+        fs::create_dir_all(&dst).unwrap();
+        let workflow = dst.join("workflows/git-commit-workflow.md");
+        fs::create_dir_all(workflow.parent().unwrap()).unwrap();
+        fs::write(&workflow, "custom").unwrap();
+
+        copy_embedded_templates(&dst, false).unwrap();
+        assert_eq!(fs::read_to_string(&workflow).unwrap(), "custom");
+
+        copy_embedded_templates(&dst, true).unwrap();
+        assert_ne!(fs::read_to_string(&workflow).unwrap(), "custom");
+    }
 }

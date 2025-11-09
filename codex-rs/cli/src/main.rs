@@ -25,8 +25,10 @@ use owo_colors::OwoColorize;
 use std::path::PathBuf;
 use supports_color::Stream;
 
+mod flow_cmd;
 mod mcp_cmd;
 
+use crate::flow_cmd::FlowCli;
 use crate::mcp_cmd::McpCli;
 use codex_core::config::Config;
 use codex_core::config::ConfigOverrides;
@@ -66,6 +68,9 @@ enum Subcommand {
     /// Run Codex non-interactively.
     #[clap(visible_alias = "e")]
     Exec(ExecCli),
+
+    /// Run Codex Flow workflows.
+    Flow(FlowCli),
 
     /// Manage login.
     Login(LoginCommand),
@@ -378,6 +383,9 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
                 root_config_overrides.clone(),
             );
             codex_exec::run_main(exec_cli, codex_linux_sandbox_exe).await?;
+        }
+        Some(Subcommand::Flow(flow_cli)) => {
+            flow_cli.run()?;
         }
         Some(Subcommand::McpServer) => {
             codex_mcp_server::run_main(codex_linux_sandbox_exe, root_config_overrides).await?;

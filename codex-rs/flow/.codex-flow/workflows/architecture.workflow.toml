@@ -1,4 +1,4 @@
-name = "commit_flow"
+name = "architecture"
 
 [defaults]
 engine = "codex"
@@ -7,11 +7,10 @@ mock = true
 [agents.commit]
 engine = "codex"
 model = "gpt-5"
-prompt = "prompts/templates/codemachine/workflows/git-commit-workflow.md"
+prompt = ".codex-flow/prompts/workflows/git-commit-workflow.md"
 
 [workflow]
 description = "从 git diff 生成提交信息"
 
   [[workflow.steps]]
-  use = "commit"
-  model = "gpt-5-codex"
+  agent = "commit"

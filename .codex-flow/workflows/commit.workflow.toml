@@ -8,6 +8,8 @@ mock = true
 engine = "codex"
 model = "gpt-5"
 prompt = "prompts/templates/codemachine/workflows/git-commit-workflow.md"
+reasoning_effort = "medium"
+reasoning_summary = "auto"
 
 [workflow]
 description = "从 git diff 生成提交信息"

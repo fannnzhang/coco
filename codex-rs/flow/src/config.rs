@@ -5,6 +5,8 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use anyhow::Result;
+use codex_protocol::config_types::ReasoningEffort;
+use codex_protocol::config_types::ReasoningSummary;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -34,6 +36,10 @@ pub struct AgentSpec {
     pub engine: Option<String>,
     pub model: Option<String>,
     pub prompt: String,
+    #[serde(default)]
+    pub reasoning_effort: Option<ReasoningEffort>,
+    #[serde(default)]
+    pub reasoning_summary: Option<ReasoningSummary>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -60,6 +66,10 @@ pub struct StepSpec {
     pub model: Option<String>,
     #[serde(default)]
     pub prompt: Option<String>,
+    #[serde(default)]
+    pub reasoning_effort: Option<ReasoningEffort>,
+    #[serde(default)]
+    pub reasoning_summary: Option<ReasoningSummary>,
     #[serde(default)]
     pub input: StepInput,
     #[serde(default)]

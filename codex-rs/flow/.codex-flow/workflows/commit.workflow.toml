@@ -1,0 +1,22 @@
+name = "commit_flow"
+
+[defaults]
+engine = "codex"
+mock = true
+
+[agents.commit]
+engine = "codex"
+model = "gpt-5"
+prompt = ".codex-flow/prompts/workflows/git-commit-workflow.md"
+
+[workflow]
+description = "从 git diff 生成提交信息"
+
+  [[workflow.steps]]
+  agent = "commit"
+  # Mock 模式下无需 input/output，真实模式可选用以下字段：
+  # [workflow.steps.input]
+  # template = "..."
+  # [workflow.steps.output]
+  # kind = "stdout" | "file"
+  # path = "..."

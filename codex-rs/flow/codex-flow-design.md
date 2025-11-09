@@ -68,6 +68,8 @@ mock = true                # 缺省用 mock 模式运行，节省成本
 engine = "codex"          # 可为 "codex" 或 "codemachine"，也可省略用 defaults.engine
 model = "gpt-5"
 prompt = "prompts/templates/codemachine/agents/01-architecture-agent.md"
+reasoning_effort = "medium" # 可选：minimal/low/medium/high，默认继承运行时配置
+reasoning_summary = "auto"   # 可选：auto/concise/detailed/none，默认继承运行时配置
 
 [workflow]
 description = "从 git diff 生成提交信息"

@@ -23,12 +23,16 @@ use crate::config::AgentSpec;
 use crate::config::FlowConfig;
 use crate::config::StepSpec;
 use crate::human_renderer::HumanEventRenderer;
+use codex_protocol::config_types::ReasoningEffort;
+use codex_protocol::config_types::ReasoningSummary;
 
 #[derive(Debug, Clone)]
 pub struct ResolvedStep {
     pub engine: String,
     pub model: String,
     pub prompt_path: String,
+    pub reasoning_effort: Option<ReasoningEffort>,
+    pub reasoning_summary: Option<ReasoningSummary>,
 }
 
 pub fn resolve_step(base: &AgentSpec, step: &StepSpec) -> ResolvedStep {
@@ -43,10 +47,14 @@ pub fn resolve_step(base: &AgentSpec, step: &StepSpec) -> ResolvedStep {
         .or(base.model.as_deref())
         .unwrap_or("gpt-5");
     let prompt_path = step.prompt.as_deref().unwrap_or(&base.prompt);
+    let reasoning_effort = step.reasoning_effort.or(base.reasoning_effort);
+    let reasoning_summary = step.reasoning_summary.or(base.reasoning_summary);
     ResolvedStep {
         engine: engine.to_string(),
         model: model.to_string(),
         prompt_path: prompt_path.to_string(),
+        reasoning_effort,
+        reasoning_summary,
     }
 }
 
@@ -69,6 +77,12 @@ pub struct CodexEngine;
 impl CodexEngine {
     pub fn new() -> Self {
         Self
+    }
+}
+
+impl Default for CodexEngine {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -140,6 +154,16 @@ fn run_codex(ctx: EngineContext<'_>) -> Result<()> {
     }
     cmd.arg("--model");
     cmd.arg(&ctx.resolved.model);
+
+    if let Some(effort) = ctx.resolved.reasoning_effort {
+        cmd.arg("--config");
+        cmd.arg(format!("model_reasoning_effort=\"{effort}\""));
+    }
+
+    if let Some(summary) = ctx.resolved.reasoning_summary {
+        cmd.arg("--config");
+        cmd.arg(format!("reasoning_summary=\"{summary}\""));
+    }
 
     if !preset_args.iter().any(|arg| arg == "--json") {
         cmd.arg("--json");
@@ -329,5 +353,77 @@ fn display_exit(status: ExitStatus) -> String {
         format!("code {code}")
     } else {
         "signal".to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::AgentSpec;
+    use crate::config::StepSpec;
+
+    fn agent_spec(
+        reasoning_effort: Option<ReasoningEffort>,
+        reasoning_summary: Option<ReasoningSummary>,
+    ) -> AgentSpec {
+        AgentSpec {
+            engine: Some("codex".to_string()),
+            model: Some("gpt-5".to_string()),
+            prompt: "prompt.md".to_string(),
+            reasoning_effort,
+            reasoning_summary,
+        }
+    }
+
+    fn step_spec(
+        reasoning_effort: Option<ReasoningEffort>,
+        reasoning_summary: Option<ReasoningSummary>,
+    ) -> StepSpec {
+        StepSpec {
+            agent: "commit".to_string(),
+            reasoning_effort,
+            reasoning_summary,
+            ..StepSpec::default()
+        }
+    }
+
+    #[test]
+    fn resolve_step_inherits_agent_reasoning_effort() {
+        let agent = agent_spec(Some(ReasoningEffort::Low), None);
+        let step = step_spec(None, None);
+
+        let resolved = resolve_step(&agent, &step);
+
+        assert_eq!(resolved.reasoning_effort, Some(ReasoningEffort::Low));
+    }
+
+    #[test]
+    fn resolve_step_prefers_step_reasoning_effort() {
+        let agent = agent_spec(Some(ReasoningEffort::Low), None);
+        let step = step_spec(Some(ReasoningEffort::High), None);
+
+        let resolved = resolve_step(&agent, &step);
+
+        assert_eq!(resolved.reasoning_effort, Some(ReasoningEffort::High));
+    }
+
+    #[test]
+    fn resolve_step_inherits_agent_reasoning_summary() {
+        let agent = agent_spec(None, Some(ReasoningSummary::Concise));
+        let step = step_spec(None, None);
+
+        let resolved = resolve_step(&agent, &step);
+
+        assert_eq!(resolved.reasoning_summary, Some(ReasoningSummary::Concise));
+    }
+
+    #[test]
+    fn resolve_step_prefers_step_reasoning_summary() {
+        let agent = agent_spec(None, Some(ReasoningSummary::Detailed));
+        let step = step_spec(None, Some(ReasoningSummary::None));
+
+        let resolved = resolve_step(&agent, &step);
+
+        assert_eq!(resolved.reasoning_summary, Some(ReasoningSummary::None));
     }
 }

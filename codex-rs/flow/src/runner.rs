@@ -58,6 +58,7 @@ pub fn run_workflow_file(file: &WorkflowFile, opts: RunOptions) -> Result<()> {
     run_workflow(&cfg, &name, opts)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_step(
     cfg: &FlowConfig,
     step: &ResolvedStep,
@@ -93,6 +94,12 @@ fn run_step(
                 "       engine={} model={} prompt={}",
                 step.engine, step.model, step.prompt_path
             );
+            if let Some(effort) = step.reasoning_effort {
+                eprintln!("       reasoning_effort={effort}");
+            }
+            if let Some(summary) = step.reasoning_summary {
+                eprintln!("       reasoning_summary={summary}");
+            }
             eprintln!("       log={}", memory_path.display());
             eprintln!("       result={}", result_path.display());
         }
@@ -132,22 +139,7 @@ fn run_step(
 
 fn build_shell_command(step: &ResolvedStep, output_path: Option<&Path>) -> String {
     match step.engine.as_str() {
-        "codex" => {
-            if let Some(path) = output_path {
-                format!(
-                    "cat \"{prompt}\" | codex exec --model {model} -o \"{out}\"",
-                    prompt = step.prompt_path,
-                    model = step.model,
-                    out = path.display()
-                )
-            } else {
-                format!(
-                    "cat \"{prompt}\" | codex exec --model {model}",
-                    prompt = step.prompt_path,
-                    model = step.model
-                )
-            }
-        }
+        "codex" => build_codex_command(step, output_path),
         "codemachine" => format!(
             "codemachine run --agent-model {model} --prompt-file \"{prompt}\"",
             model = step.model,
@@ -155,6 +147,26 @@ fn build_shell_command(step: &ResolvedStep, output_path: Option<&Path>) -> Strin
         ),
         other => format!("echo 'Unsupported engine: {other}'"),
     }
+}
+
+fn build_codex_command(step: &ResolvedStep, output_path: Option<&Path>) -> String {
+    let mut cmd = format!(
+        "cat \"{prompt}\" | codex exec --model {model}",
+        prompt = step.prompt_path,
+        model = step.model
+    );
+    if let Some(effort) = step.reasoning_effort {
+        cmd.push_str(&format!(
+            " --config model_reasoning_effort=\\\"{effort}\\\""
+        ));
+    }
+    if let Some(summary) = step.reasoning_summary {
+        cmd.push_str(&format!(" --config reasoning_summary=\\\"{summary}\\\""));
+    }
+    if let Some(path) = output_path {
+        cmd.push_str(&format!(" -o \"{}\"", path.display()));
+    }
+    cmd
 }
 
 struct StepPaths {

@@ -63,7 +63,7 @@ pub fn init_scaffold(target_dir: &Path, templates_dir: Option<&Path>, force: boo
     let workflows_dir = root.join("workflows");
     fs::create_dir_all(&workflows_dir)
         .with_context(|| format!("failed to create {}", workflows_dir.display()))?;
-    let workflow_file = workflows_dir.join("commit.workflow.toml");
+    let workflow_file = workflows_dir.join("codex-flow-development.workflow.toml");
     if !workflow_file.exists() || force {
         fs::write(&workflow_file, DEFAULT_WORKFLOW_TOML)
             .with_context(|| format!("failed to write {}", workflow_file.display()))?;

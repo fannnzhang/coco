@@ -2,19 +2,19 @@ name = "codex_flow_development"
 
 [defaults]
 engine = "codex"
-model = "gpt-5-codex"
+model = "gpt-5"
 mock = false
 
 [agents.init]
 engine = "codex"
-model = "gpt-5"
+profile = "qwen"
 reasoning_effort = "low"
 reasoning_summary = "none"
 prompt = ".codex-flow/prompts/speckit/init.md"
 
 [agents.commit]
 engine = "codex"
-model = "gpt-5"
+profile = "qwen"
 reasoning_effort = "low"
 reasoning_summary = "none"
 prompt = ".codex-flow/prompts/speckit/git-commit-agent.md"
@@ -25,6 +25,20 @@ model = "gpt-5"
 reasoning_effort = "medium"
 reasoning_summary = "none"
 prompt = ".codex-flow/prompts/speckit/specification-agent.md"
+
+[agents.architecture]
+engine = "codex"
+model = "gpt-5"
+reasoning_effort = "high"
+reasoning_summary = "none"
+prompt = ".codex-flow/prompts/speckit/specification-agent.md"
+
+[agents.context]
+engine = "codex"
+model = "gpt-5"
+reasoning_effort = "medium"
+reasoning_summary = "none"
+prompt = ".codex-flow/prompts/speckit/context-manager-agent.md"
 
 [agents.speckit]
 engine = "codex"
@@ -75,6 +89,18 @@ description = "初始检查 保证分支干净"
 [[workflow.steps]]
 agent = "specification"
 description = "将自然语言需求描述转化为标准specification需求文档"
+
+[[workflow.steps]]
+agent = "architecture"
+description = "根据标准specification需求文档进行代码架构分析"
+
+[[workflow.steps]]
+agent = "context"
+description = "总结已有context"
+
+[[workflow.steps]]
+agent = "commit"
+description = "提交spec到commit"
 
 [[workflow.steps]]
 agent = "speckit"

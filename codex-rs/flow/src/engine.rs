@@ -30,6 +30,7 @@ use codex_protocol::config_types::ReasoningSummary;
 pub struct ResolvedStep {
     pub engine: String,
     pub model: String,
+    pub profile: Option<String>,
     pub prompt_path: String,
     pub reasoning_effort: Option<ReasoningEffort>,
     pub reasoning_summary: Option<ReasoningSummary>,
@@ -47,11 +48,13 @@ pub fn resolve_step(base: &AgentSpec, step: &StepSpec) -> ResolvedStep {
         .or(base.model.as_deref())
         .unwrap_or("gpt-5");
     let prompt_path = step.prompt.as_deref().unwrap_or(&base.prompt);
+    let profile = base.profile.clone();
     let reasoning_effort = step.reasoning_effort.or(base.reasoning_effort);
     let reasoning_summary = step.reasoning_summary.or(base.reasoning_summary);
     ResolvedStep {
         engine: engine.to_string(),
         model: model.to_string(),
+        profile,
         prompt_path: prompt_path.to_string(),
         reasoning_effort,
         reasoning_summary,
@@ -152,8 +155,6 @@ fn run_codex(ctx: EngineContext<'_>) -> Result<()> {
     if !preset_args.iter().any(|arg| arg == "exec") {
         cmd.arg("exec");
     }
-    cmd.arg("--model");
-    cmd.arg(&ctx.resolved.model);
 
     if let Some(effort) = ctx.resolved.reasoning_effort {
         cmd.arg("--config");
@@ -163,6 +164,14 @@ fn run_codex(ctx: EngineContext<'_>) -> Result<()> {
     if let Some(summary) = ctx.resolved.reasoning_summary {
         cmd.arg("--config");
         cmd.arg(format!("reasoning_summary=\"{summary}\""));
+    }
+
+    if let Some(profile) = &ctx.resolved.profile {
+        cmd.arg("--profile");
+        cmd.arg(profile);
+    } else {
+        cmd.arg("--model");
+        cmd.arg(&ctx.resolved.model);
     }
 
     if !preset_args.iter().any(|arg| arg == "--json") {
@@ -369,6 +378,7 @@ mod tests {
         AgentSpec {
             engine: Some("codex".to_string()),
             model: Some("gpt-5".to_string()),
+            profile: None,
             prompt: "prompt.md".to_string(),
             reasoning_effort,
             reasoning_summary,

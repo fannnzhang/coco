@@ -17,6 +17,8 @@ walkdir = { workspace = true }
 textwrap = { workspace = true }
 codex-exec = { path = "../exec" }
 include_dir = "0.7"
+chrono = { workspace = true }
+regex-lite = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

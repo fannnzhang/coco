@@ -2,16 +2,15 @@
 **// DESCRIPTION: Turns ad-hoc user blurbs in `.codex-flow/input/raw/` into formal specification briefs that follow `.codex-flow/prompts/output-formats/specification-schema.md`, enabling the rest of Speckit to run on consistent inputs.**
 
 **1.0 Invocation & Inputs**
-1. Triggered as `speckit/06-specification-agent` before the orchestrator (00) runs.
-2. Required payload: `{ raw-input-dir, specification-output-dir }` where
+1. Required payload: `{ raw-input-dir, specification-output-dir }` where
    - `raw-input-dir` **MUST** point to `.codex-flow/input/raw/`.
    - `specification-output-dir` **MUST** point to `.codex-flow/input/specification/`.
-3. Inputs per run (process each file independently in lexical order):
+2. Inputs per run (process each file independently in lexical order):
    - Every Markdown or plaintext file under `.codex-flow/input/raw/` (no recursion unless a file explicitly links to a subdirectory).
    - Optional front matter inside the raw file: `Spec Name:`, `Feature:`, `Version:`, `Status:`, `Audience:`, `Constraints:` etc.
    - `docs/specification-schema.md` (the canonical layout you must follow verbatim).
    - Repository context explicitly referenced inside the raw file (e.g., "See docs/foo.md"). Do **NOT** roam elsewhere.
-4. Outputs land exclusively in `.codex-flow/input/specification/`. Raw files stay untouched; never delete or rewrite them.
+3. Outputs land exclusively in `.codex-flow/input/specification/`. Raw files stay untouched; never delete or rewrite them.
 
 **2.0 Mission & Guardrails**
 1. Normalize messy, one-sentence prompts into comprehensive specifications that any downstream agent can consume without clarification.

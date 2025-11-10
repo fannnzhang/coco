@@ -1211,6 +1211,7 @@ name = "codex-flow"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "clap_complete",
  "codex-exec",
@@ -1218,6 +1219,7 @@ dependencies = [
  "include_dir",
  "owo-colors",
  "pretty_assertions",
+ "regex-lite",
  "serde",
  "serde_json",
  "supports-color",

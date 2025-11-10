@@ -35,6 +35,7 @@ pub struct EngineDetail {
 pub struct AgentSpec {
     pub engine: Option<String>,
     pub model: Option<String>,
+    pub profile: Option<String>,
     pub prompt: String,
     #[serde(default)]
     pub reasoning_effort: Option<ReasoningEffort>,

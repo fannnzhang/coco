@@ -226,16 +226,17 @@ impl FileAuthStorage {
         Ok(())
     }
 
-    fn write_current_auth(&self, auth: &AuthDotJson) -> std::io::Result<()> {
-        let current = get_auth_file(&self.codex_home);
-        self.write_json(&current, auth)?;
-        self.mark_file_used(&current);
-        Ok(())
-    }
-
     fn infer_account_file(&self, auth: &AuthDotJson) -> Option<PathBuf> {
         let email = auth.tokens.as_ref()?.id_token.email.as_ref()?;
         Some(self.accounts_dir().join(format!("{email}.json")))
+    }
+
+    fn write_fallback_auth(&self, auth: &AuthDotJson) -> std::io::Result<()> {
+        let fallback = get_auth_file(&self.codex_home);
+        self.write_json(&fallback, auth)?;
+        self.mark_file_used(&fallback);
+        self.set_active_path(fallback);
+        Ok(())
     }
 
     fn candidate_paths(&self) -> std::io::Result<Vec<PathBuf>> {
@@ -354,7 +355,9 @@ impl AuthStorageBackend for FileAuthStorage {
 
         let mut ordered_paths: Vec<PathBuf> = Vec::new();
         if let Some(active) = self.lock_active_auth_file().clone() {
-            ordered_paths.push(active);
+            if is_email_auth_candidate(&active) {
+                ordered_paths.push(active);
+            }
         }
         for path in self.candidate_paths()? {
             if !ordered_paths.iter().any(|existing| existing == &path) {
@@ -374,7 +377,6 @@ impl AuthStorageBackend for FileAuthStorage {
                 CandidateOutcome::Available(auth) => {
                     self.set_active_path(path.clone());
                     self.mark_file_used(&path);
-                    self.write_current_auth(&auth)?;
                     return Ok(Some(auth));
                 }
                 CandidateOutcome::UsageLimited { auth, limit } => {
@@ -392,7 +394,6 @@ impl AuthStorageBackend for FileAuthStorage {
 
         if let Some((_, path, auth)) = blocked {
             self.set_active_path(path);
-            self.write_current_auth(&auth)?;
             return Ok(Some(auth));
         }
 
@@ -400,6 +401,7 @@ impl AuthStorageBackend for FileAuthStorage {
         match std::fs::metadata(&fallback) {
             Ok(metadata) if metadata.is_file() => match self.try_read_auth_json(&fallback) {
                 Ok(auth) => {
+                    self.set_active_path(fallback.clone());
                     self.mark_file_used(&fallback);
                     Ok(Some(auth))
                 }
@@ -417,20 +419,31 @@ impl AuthStorageBackend for FileAuthStorage {
             let guard = self.lock_active_auth_file();
             guard.clone()
         };
-        let account_target = current_active.or_else(|| self.infer_account_file(auth_dot_json));
+        let active_is_fallback = current_active
+            .as_deref()
+            .is_some_and(|path| path.file_name() == Some(OsStr::new("auth.json")));
 
-        if let Some(path) = account_target {
+        if !active_is_fallback {
+            if let Some(path) = self.infer_account_file(auth_dot_json) {
+                self.write_json(&path, auth_dot_json)?;
+                self.mark_file_used(&path);
+                self.set_active_path(path);
+                return Ok(());
+            }
+        }
+
+        if let Some(path) = current_active {
+            if active_is_fallback {
+                return self.write_fallback_auth(auth_dot_json);
+            }
+
             self.write_json(&path, auth_dot_json)?;
             self.mark_file_used(&path);
             self.set_active_path(path);
-            self.write_current_auth(auth_dot_json)?;
             return Ok(());
         }
 
-        let fallback = get_auth_file(&self.codex_home);
-        self.write_json(&fallback, auth_dot_json)?;
-        self.mark_file_used(&fallback);
-        Ok(())
+        self.write_fallback_auth(auth_dot_json)
     }
 
     fn delete(&self) -> std::io::Result<bool> {
@@ -624,7 +637,7 @@ impl AuthStorageBackend for AutoAuthStorage {
             Ok(()) => Ok(()),
             Err(err) => {
                 warn!("failed to save auth to keyring, falling back to file storage: {err}");
-                self.file_storage.save(auth)
+                self.file_storage.write_fallback_auth(auth)
             }
         }
     }
@@ -730,8 +743,8 @@ mod tests {
         );
         let current_path = get_auth_file(codex_home.path());
         assert!(
-            current_path.exists(),
-            "expected copied auth.json to exist before invalidation"
+            !current_path.exists(),
+            "fallback auth.json should not exist before invalidation"
         );
 
         let invalid_path =
@@ -751,7 +764,7 @@ mod tests {
         );
         assert!(
             !current_path.exists(),
-            "active auth.json should be removed after invalidation"
+            "fallback auth.json should remain absent after invalidation"
         );
         Ok(())
     }
@@ -812,10 +825,10 @@ mod tests {
             .expect("should load bob auth second");
         assert_eq!(second, bob_auth);
         let current_path = codex_home.path().join("auth.json");
-        let current = storage_second
-            .try_read_auth_json(&current_path)
-            .context("read current auth.json")?;
-        assert_eq!(current, bob_auth);
+        assert!(
+            !current_path.exists(),
+            "fallback auth.json should remain untouched when rotating accounts"
+        );
         Ok(())
     }
 
@@ -854,10 +867,10 @@ mod tests {
             .expect("available auth should load");
         assert_eq!(loaded, available_auth);
         let current_path = codex_home.path().join("auth.json");
-        let current = storage
-            .try_read_auth_json(&current_path)
-            .context("read current auth.json after skipping limited")?;
-        assert_eq!(current, available_auth);
+        assert!(
+            !current_path.exists(),
+            "fallback auth.json should remain untouched when limited accounts are skipped"
+        );
         Ok(())
     }
 
@@ -887,10 +900,10 @@ mod tests {
             .expect("limited auth should still be returned");
         assert_eq!(loaded, limited_auth);
         let current_path = codex_home.path().join("auth.json");
-        let current = storage
-            .try_read_auth_json(&current_path)
-            .context("read current auth.json for limited account")?;
-        assert_eq!(current, limited_auth);
+        assert!(
+            !current_path.exists(),
+            "fallback auth.json should not mirror limited account data"
+        );
         Ok(())
     }
 
@@ -920,10 +933,93 @@ mod tests {
             .context("read updated alice auth")?;
         assert_eq!(saved, updated);
         let current_path = codex_home.path().join("auth.json");
-        let current = storage
-            .try_read_auth_json(&current_path)
-            .context("read current auth.json after save")?;
-        assert_eq!(current, updated);
+        assert!(
+            !current_path.exists(),
+            "saving multi-account credentials should not touch fallback auth.json"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn file_storage_save_prefers_inferred_email_file() -> anyhow::Result<()> {
+        let codex_home = tempdir()?;
+        let alice_auth = auth_with_prefix("alice");
+        let bob_auth = auth_with_prefix("bob");
+        let auth_dir = codex_home.path().join("auth");
+        std::fs::create_dir_all(&auth_dir)?;
+        let alice_path = auth_dir.join("alice@example.com.json");
+        let bob_path = auth_dir.join("bob@example.com.json");
+        std::fs::write(
+            &alice_path,
+            serde_json::to_string_pretty(&alice_auth).context("serialize alice auth")?,
+        )?;
+
+        let storage = FileAuthStorage::new(codex_home.path().to_path_buf());
+        let loaded = <FileAuthStorage as AuthStorageBackend>::load(&storage)?
+            .expect("should load alice auth first");
+        assert_eq!(loaded, alice_auth);
+
+        <FileAuthStorage as AuthStorageBackend>::save(&storage, &bob_auth)?;
+
+        let saved_bob = storage
+            .try_read_auth_json(&bob_path)
+            .context("read bob auth after save")?;
+        assert_eq!(saved_bob, bob_auth);
+        let saved_alice = storage
+            .try_read_auth_json(&alice_path)
+            .context("read alice auth remains unchanged")?;
+        assert_eq!(saved_alice, alice_auth);
+        let fallback = codex_home.path().join("auth.json");
+        assert!(
+            !fallback.exists(),
+            "saving inferred account should not touch fallback auth.json"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn file_storage_fallback_save_does_not_recreate_removed_account() -> anyhow::Result<()> {
+        let codex_home = tempdir()?;
+        let alice_auth = auth_with_prefix("alice");
+        let fallback_auth = auth_with_prefix("charlie");
+        let auth_dir = codex_home.path().join("auth");
+        std::fs::create_dir_all(&auth_dir)?;
+        let alice_path = auth_dir.join("alice@example.com.json");
+        std::fs::write(
+            &alice_path,
+            serde_json::to_string_pretty(&alice_auth).context("serialize alice auth")?,
+        )?;
+
+        let storage = FileAuthStorage::new(codex_home.path().to_path_buf());
+        let loaded = <FileAuthStorage as AuthStorageBackend>::load(&storage)?
+            .expect("should load alice auth first");
+        assert_eq!(loaded, alice_auth);
+
+        std::fs::remove_file(&alice_path)?;
+        std::fs::remove_dir_all(&auth_dir)?;
+
+        let fallback_path = codex_home.path().join("auth.json");
+        std::fs::write(
+            &fallback_path,
+            serde_json::to_string_pretty(&fallback_auth).context("serialize fallback auth")?,
+        )?;
+
+        let fallback_loaded = <FileAuthStorage as AuthStorageBackend>::load(&storage)?
+            .expect("should load fallback auth");
+        assert_eq!(fallback_loaded, fallback_auth);
+
+        let mut updated = fallback_loaded;
+        updated.openai_api_key = Some("charlie-updated".to_string());
+        <FileAuthStorage as AuthStorageBackend>::save(&storage, &updated)?;
+
+        let hydrated = storage
+            .try_read_auth_json(&fallback_path)
+            .context("read fallback auth after save")?;
+        assert_eq!(hydrated, updated);
+        assert!(
+            !alice_path.exists(),
+            "saving fallback credentials should not recreate removed account file"
+        );
         Ok(())
     }
 

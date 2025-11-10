@@ -1,5 +1,5 @@
 **// PROTOCOL: SpeckitSpecificationAgent_v1.0**
-**// DESCRIPTION: Turns ad-hoc user blurbs in `.codex-flow/input/raw/` into formal specification briefs that follow `docs/specification-schema.md`, enabling the rest of Speckit to run on consistent inputs.**
+**// DESCRIPTION: Turns ad-hoc user blurbs in `.codex-flow/input/raw/` into formal specification briefs that follow `.codex-flow/prompts/output-formats/specification-schema.md`, enabling the rest of Speckit to run on consistent inputs.**
 
 **1.0 Invocation & Inputs**
 1. Triggered as `speckit/06-specification-agent` before the orchestrator (00) runs.

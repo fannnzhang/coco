@@ -6,7 +6,7 @@
 2. Required payload: `{ spec-name, tasks.md, design.md, requirements.md, path-to-requirements-input, path-to-spec-agent-output }`.
 3. Input definitions:
    - `path-to-spec-agent-output`: `.codex-flow/runtime/speckit/spec-agent-output/<spec-name>.md`, which must be updated with implementation progress and proof of executed checks.
-   - `tasks.md`: the authoritative execution plan at `specs/<spec-name>/tasks.md`. This file dictates task order, required code changes, and every command/check you are allowed to run.
+   - `tasks.md`: the authoritative execution plan at `.codex-flow/runtime/specs/<spec-name>/tasks.md`. This file dictates task order, required code changes, and every command/check you are allowed to run.
    - Repository files explicitly listed in tasks.md (under **Files / Modules** or acceptance instructions) are the only code locations you may touch unless a downstream task unlocks new paths.
 
 **2.0 Operating Principles**

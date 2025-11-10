@@ -139,11 +139,11 @@ fn run_codex(ctx: EngineContext<'_>) -> Result<()> {
         .as_ref()
         .map(|detail| {
             (
-                detail.bin.clone().unwrap_or_else(|| "codex".to_string()),
+                detail.bin.clone().unwrap_or_else(|| "cocos".to_string()),
                 detail.args.clone(),
             )
         })
-        .unwrap_or_else(|| ("codex".to_string(), Vec::new()));
+        .unwrap_or_else(|| ("cocos".to_string(), Vec::new()));
 
     let mut cmd = Command::new(bin);
     if !preset_args.is_empty() {

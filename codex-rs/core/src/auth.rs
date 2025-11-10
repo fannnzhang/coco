@@ -245,9 +245,10 @@ impl CodexAuth {
     fn invalidate_current_account(&self) -> std::io::Result<Option<PathBuf>> {
         let result = self.storage.invalidate_active_account()?;
         if result.is_some()
-            && let Ok(mut guard) = self.auth_dot_json.lock() {
-                *guard = None;
-            }
+            && let Ok(mut guard) = self.auth_dot_json.lock()
+        {
+            *guard = None;
+        }
         Ok(result)
     }
 

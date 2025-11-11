@@ -216,7 +216,7 @@ fn resolve_mock_flag(args: &RunArgs, default: Option<bool>) -> bool {
     } else if args.no_mock {
         false
     } else {
-        default.unwrap_or(true)
+        default.unwrap_or(false)
     }
 }
 

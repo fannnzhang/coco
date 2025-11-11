@@ -7,6 +7,7 @@ use clap::Parser;
 use clap::Subcommand;
 use codex_flow::config;
 use codex_flow::runner;
+use codex_flow::runner::RunSummary;
 use codex_flow::scaffold;
 
 #[derive(Debug, Parser)]
@@ -85,7 +86,7 @@ fn handle_run(args: FlowRunArgs) -> Result<()> {
 
     if let Ok(wf) = config::WorkflowFile::load(&args.file) {
         let mock = mock_override.unwrap_or_else(|| wf.defaults.mock.unwrap_or(true));
-        runner::run_workflow_file(&wf, runner::RunOptions { mock, verbose })?
+        runner::run_workflow_file(&wf, runner::RunOptions { mock, verbose }, None);
     } else {
         let cfg = config::FlowConfig::load(&args.file)?;
         let mock = mock_override.unwrap_or_else(|| cfg.defaults.mock.unwrap_or(true));
@@ -95,7 +96,7 @@ fn handle_run(args: FlowRunArgs) -> Result<()> {
             .next()
             .cloned()
             .unwrap_or_else(|| "main".to_string());
-        runner::run_workflow(&cfg, &name, runner::RunOptions { mock, verbose })?;
+        runner::run_workflow(&cfg, &name, runner::RunOptions { mock, verbose }, None);
     }
 
     Ok(())

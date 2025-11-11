@@ -19,6 +19,7 @@ codex-exec = { path = "../exec" }
 include_dir = "0.7"
 chrono = { workspace = true }
 regex-lite = { workspace = true }
+ctrlc = "3.4"
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

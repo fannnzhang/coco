@@ -83,23 +83,6 @@
 
 ---
 
-## 6. 迁移与回滚（Migration & Rollback）（如需）
-
-- 数据迁移：`<脚本/回滚>`
-- 配置/版本控制：`<策略>`
-- 切换计划：`<方案>`
-
-- 数据库迁移占位：
-  ```
-  Migration(X, Y, (db) async {
-    await db.execute('ALTER TABLE <table> ADD COLUMN <col> <type> DEFAULT <v>');
-  });
-  ```
-
----
-
-
-
 ## 7. 代码组织与约定（Code Map & Conventions）
 
 - 目录与命名：`<对齐项目约定>`

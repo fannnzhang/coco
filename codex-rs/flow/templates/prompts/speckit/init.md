@@ -2,10 +2,10 @@
 
 **Task:**
 
-1.  **Ensure the current branch is `main` by following this specific logic:**
-    * First, check if the *current* branch is already `main`. If it is, this step is complete.
-    * If not, check if a branch named `main` *already exists*. If it does, switch to it.
-    * If it does not exist, create it as a new branch and switch to it (e.g., `git checkout -b main`).
+1.  **Ensure the current branch is `feature/flow` by following this specific logic:**
+    * First, check if the *current* branch is already `feature/flow`. If it is, this step is complete.
+    * If not, check if a branch named `feature/flow` *already exists*. If it does, switch to it.
+    * If it does not exist, create it as a new branch and switch to it (e.g., `git checkout -b feature/flow`).
 
 2.  **Append the following lines to the `.gitignore` file, skipping any that already exist:**
     ```

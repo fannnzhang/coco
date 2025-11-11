@@ -38,34 +38,12 @@ You will generate the blueprint's content, splitting it across the following set
         *   `## 5. Future Considerations`
         *   `## 6. Glossary`
 
-#### **Content Formatting Rule: Granular Anchors**
 
-Within ALL of these files, you MUST make the content "addressable" by inserting unique anchors. An anchor is a machine-readable HTML comment placed directly before a heading.
+### **2. Output Directory**
 
-*   **Format:** The anchor format MUST be `<!-- anchor: [unique-kebab-case-key] -->`.
-*   **Placement:** Place an anchor immediately before any sub-heading (e.g., `### 3.1`, `#### 3.8.1`) that represents a distinct concept a future agent might need to reference.
-
----
-
-### **2. Smart Manifest Generation (`architecture_manifest.json`)**
-
-After generating the Markdown files, you will generate a single `architecture_manifest.json` file. This is the "address book" that indexes the entire blueprint.
-
-The manifest MUST contain a root object with a key `locations`, which is an array of "location objects". Each object is an address to a single piece of architectural knowledge and MUST have the following structure:
-
-*   `key`: (String) A unique, kebab-case identifier matching the anchor in the Markdown files.
-*   `file`: (String) The exact filename where this piece of knowledge is located (filename only, not the full path).
-*   `start_anchor`: (String) The exact anchor text (`<!-- anchor: ... -->`) that marks the beginning of the content.
-*   `description`: (String) A brief, one-sentence description of the section's content.
-
----
-
-### **3. Output Directory**
-
-**All generated files** (the `.md` content files and the `architecture_manifest.json`) MUST be created inside the following directory: `.codex-flow/artifacts/architecture/`.
+**All generated files** (the `.md` content files) MUST be created inside the following directory: `.codex-flow/artifacts/architecture/`.
 
 **Example final file paths:**
 *   `.codex-flow/artifacts/architecture/01_Context_and_Drivers.md`
 *   `.codex-flow/artifacts/architecture/02_Architecture_Overview.md`
 *   ...etc.
-*   `.codex-flow/artifacts/architecture/architecture_manifest.json`

@@ -25,6 +25,7 @@ use crate::config::StepSpec;
 use crate::human_renderer::HumanEventRenderer;
 use codex_protocol::config_types::ReasoningEffort;
 use codex_protocol::config_types::ReasoningSummary;
+use metrics::token_ledger::UsageRecorder;
 
 #[derive(Debug, Clone)]
 pub struct ResolvedStep {
@@ -61,6 +62,8 @@ pub fn resolve_step(base: &AgentSpec, step: &StepSpec) -> ResolvedStep {
     }
 }
 
+pub mod metrics;
+
 pub struct EngineContext<'a> {
     pub cfg: &'a FlowConfig,
     pub resolved: &'a ResolvedStep,
@@ -72,7 +75,11 @@ pub struct EngineContext<'a> {
 
 pub trait Engine {
     fn name(&self) -> &'static str;
-    fn run(&mut self, ctx: EngineContext<'_>) -> Result<()>;
+    fn run(
+        &mut self,
+        ctx: EngineContext<'_>,
+        metrics: Option<&mut dyn UsageRecorder>,
+    ) -> Result<()>;
 }
 
 pub struct CodexEngine;
@@ -94,8 +101,12 @@ impl Engine for CodexEngine {
         "codex"
     }
 
-    fn run(&mut self, ctx: EngineContext<'_>) -> Result<()> {
-        run_codex(ctx)
+    fn run(
+        &mut self,
+        ctx: EngineContext<'_>,
+        metrics: Option<&mut dyn UsageRecorder>,
+    ) -> Result<()> {
+        run_codex(ctx, metrics)
     }
 }
 
@@ -122,12 +133,16 @@ impl Engine for MockEngine {
         "mock"
     }
 
-    fn run(&mut self, ctx: EngineContext<'_>) -> Result<()> {
-        replay_mock(ctx, self.delay)
+    fn run(
+        &mut self,
+        ctx: EngineContext<'_>,
+        metrics: Option<&mut dyn UsageRecorder>,
+    ) -> Result<()> {
+        replay_mock(ctx, self.delay, metrics)
     }
 }
 
-fn run_codex(ctx: EngineContext<'_>) -> Result<()> {
+fn run_codex(ctx: EngineContext<'_>, mut metrics: Option<&mut dyn UsageRecorder>) -> Result<()> {
     let prompt = fs::read_to_string(&ctx.resolved.prompt_path).with_context(|| {
         format!(
             "failed to read prompt template {}",
@@ -252,6 +267,11 @@ fn run_codex(ctx: EngineContext<'_>) -> Result<()> {
         let event: ThreadEvent = serde_json::from_str(trimmed)
             .with_context(|| format!("failed to parse codex exec event: {trimmed}"))?;
         ctx.renderer.render_event(&event);
+        if let Some(sink) = metrics.as_deref_mut()
+            && let ThreadEvent::TurnCompleted(turn) = &event
+        {
+            sink.record_turn_usage(&turn.usage);
+        }
     }
 
     log_writer
@@ -282,7 +302,11 @@ fn run_codex(ctx: EngineContext<'_>) -> Result<()> {
     Ok(())
 }
 
-fn replay_mock(ctx: EngineContext<'_>, delay: Duration) -> Result<()> {
+fn replay_mock(
+    ctx: EngineContext<'_>,
+    delay: Duration,
+    mut metrics: Option<&mut dyn UsageRecorder>,
+) -> Result<()> {
     let file = File::open(ctx.memory_path).with_context(|| {
         format!(
             "failed to open mock memory log {}",
@@ -333,6 +357,11 @@ fn replay_mock(ctx: EngineContext<'_>, delay: Duration) -> Result<()> {
             _ => {}
         }
         ctx.renderer.render_event(&event);
+        if let Some(sink) = metrics.as_deref_mut()
+            && let ThreadEvent::TurnCompleted(turn) = &event
+        {
+            sink.record_turn_usage(&turn.usage);
+        }
         emitted_any = true;
     }
 

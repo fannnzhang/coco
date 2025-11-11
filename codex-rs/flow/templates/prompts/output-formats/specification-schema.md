@@ -2,89 +2,47 @@
 
 This template is designed to scale with your project's needs.
 
-*   **For simple or initial-phase projects, completing Part 1 (The Essentials) is sufficient.**
-*   **For complex, enterprise-grade, or high-fidelity projects, completing Part 2 (Advanced Specifications) is highly recommended** to ensure clarity, reduce risk, and guide a more robust architectural design.
-
 ---
 
-### **Part 1: The Essentials (Core Requirements for Any Project)**
+#### 1.0 需求概述
+- **1.1 需求名称：** *填写 raw 文档中的名称或摘要。*
+- **1.2 背景痛点：** *列出用户明确提到的痛点，例如信息丢失、token 浪费。*
+- **1.3 目标与收益：**
+  - 流程中断后 **MUST** 继续执行。
+  - 历史 agent 信息 **MUST** 保留可复用。
+  - 重新执行 **MUST NOT** 产生额外 token 消耗。
 
-*This section captures the minimum information required for an AI to understand and build a functional application.*
+#### 2.0 功能范围
+- **2.1 Agent 状态记录**
+  - *记录时机：引用用户描述；若未说明则写“未提供”。*
+  - *记录内容：逐条列出用户提及需要保存的要素；未提即写“未提供”。*
+- **2.2 中断恢复流程**
+  - *流程中断触发条件。*
+  - *恢复入口与步骤，确保恢复点紧接最后成功的 agent。*
+- **2.3 Token 成本控制**
+  - *描述对重复执行和 token 消耗的限制。*
 
-#### **1.0 Project Overview (Required)**
-*   **1.1 Project Name:** *[e.g., "SimpleTodo App"]*
-*   **1.2 Project Goal:** A one or two-sentence summary of what the project is meant to achieve.
-*   **1.3 Target Audience:** Who is this for? *[e.g., "General users who need a simple task manager."]*
+#### 3.0 用户旅程
+> 采用“用户动作 → Flow 工具响应 → 结果”格式，仅复述原始需求中的场景。若只描述了单一场景，就仅填写该场景。
 
-#### **2.0 Core Functionality & User Journeys (Required)**
-*Describe the primary features and how users will interact with them. Use RFC keywords (MUST, SHOULD, MAY).*
+1. 用户触发 workflow → 系统记录当前 agent 状态 → 结果：状态可供后续恢复。
+2. 用户因中断重新启动 → 系统定位最后成功的 agent → 结果：继续执行且不重复已完成步骤。
 
-*   **2.1 Core Features List:** A high-level, bulleted list of the main capabilities.
-    *   *Example: User Authentication, Task Management, Profile Settings.*
-*   **2.2 User Journeys:** Step-by-step descriptions of user interactions.
-    *   *Format:* `User [action] → app [keyword] [reaction] → [outcome]`
-    *   *Example:* User clicks delete → app **MUST** show "are you sure?" popup → YES deletes, NO cancels.
-    *   *Example:* User submits form → app **MUST** check all fields for validation → show errors OR save and show success.
+#### 4.0 状态数据与存储
+- **4.1 状态内容：** *列出用户明确要求保存的信息；未说明则标注“未提供”。*
+- **4.2 存储介质 / 目录：** *根据原文填写；未说明则标注“未提供”。*
+- **4.3 一致性要求：** *仅记录用户原话，例如“不能浪费之前的信息”。*
 
-#### **3.0 Data Models (Required)**
-*Define the structure of the data the application will manage.*
+#### 5.0 异常与恢复策略
+- **5.1 中断场景：** *描述用户提到的中断类型；未提则写“未提供”。*
+- **5.2 恢复约束：** *写明“必须从中断点继续”“不得重复执行”等原始要求。*
 
-*   **Format:** `Entity: field (keyword, [constraints]), ...`
-*   *Example (User):* `email` (REQUIRED, valid email), `password` (REQUIRED, 8+ chars, hashed), `name` (REQUIRED)
-*   *Example (Task):* `title` (REQUIRED, 100 chars max), `is_complete` (REQUIRED, boolean, default=false), `due_date` (OPTIONAL)
+#### 6.0 验收标准
+- 成功恢复一次中断 workflow 时 **MUST** 无信息丢失。
+- 单次恢复 **MUST NOT** 产生额外 token 消耗。
+- 若用户提供了其他可验证标准，逐条列出；否则标注“未提供”。
 
-#### **4.0 Essential Error Handling (Required)**
-*Describe how the application must behave during common failure scenarios.*
-
-*   **No Internet:** The app **MUST** show an "Offline" message.
-*   **Invalid User Input:** The app **MUST** highlight the incorrect field in red with a helpful message.
-*   **Server Error:** The app **SHOULD** show a generic "Something went wrong" message with an option to retry.
-
----
----
-
-### **Part 2: Advanced Specifications (For Complex or High-Fidelity Projects)**
-
-*This section adds the formality, detail, and foresight needed for larger, more critical applications.*
-
-#### **5.0 Formal Project Controls & Scope (Highly Recommended)**
-*   **5.1 Document Control:**
-    *   **Version:** *[e.g., 1.0]* | **Status:** *[e.g., Approved]* | **Date:** *[e.g., October 27, 2025]*
-*   **5.2 Detailed Scope:**
-    *   **In Scope:** An explicit bulleted list of functionalities that **WILL** be delivered.
-    *   **Out of Scope:** An explicit bulleted list of functionalities that **WILL NOT** be delivered to prevent scope creep.
-*   **5.3 Glossary of Terms & Acronyms:** A table defining all domain-specific terminology (e.g., ESG, CBAM, GHG).
-
-#### **6.0 Granular & Traceable Requirements (Recommended for Traceability)**
-*This formalizes the User Journeys from Part 1 into a trackable format.*
-
-| ID | Requirement Name / User Story | Description | Priority |
-| :--- | :--- | :--- | :--- |
-| **FR-001**| User Login | The system **MUST** allow a registered user to log in with an email and password. | Critical |
-| **FR-002**| AI Document Verification | The system **MUST** use an LLM to extract data from uploaded invoices. | High |
-
-#### **7.0 Measurable Non-Functional Requirements (NFRs) (Critical for Architecture)**
-*Define the quality attributes and constraints. Each NFR should be specific and measurable.*
-
-| ID | Category | Requirement | Metric / Acceptance Criteria |
-| :--- | :--- | :--- | :--- |
-| **NFR-PERF-001**| Performance| API Response Time | 95% of read-only API calls **MUST** complete in < 250ms. |
-| **NFR-ACC-001** | **Accuracy** | AI Data Extraction| Key fields from structured invoices **MUST** be extracted with >90% accuracy. |
-| **NFR-REL-001** | **Reliability**| System Uptime | The service **MUST** maintain 99.5% uptime. |
-| **NFR-SEC-001** | Security | Data Privacy | **MUST** comply with GDPR and KSA PDPL data handling standards. |
-| **NFR-SCALE-001**| Scalability| Concurrent Users | **MUST** support 1,000 concurrent users without performance degradation. |
-| **NFR-EXT-001** | **Extensibility**| Future Regulations | The architecture **MUST** allow adding a new reporting framework via configuration, not a code rewrite. |
-
-
-#### **8.0 Technical & Architectural Constraints (Optional)**
-*Provide specific technical directives if you have them. If not, the AI will propose a suitable architecture.*
-
-*   **8.1 Technology Stack:** *[e.g., Frontend: React, Backend: Node.js, Database: PostgreSQL]*
-*   **8.2 Architectural Principles:** *[e.g., "The system **MUST** be a microservices architecture."]*
-*   **8.3 Deployment Environment:** *[e.g., "The application **MUST** be containerized using Docker and deployed to AWS."]*
-
-#### **9.0 Assumptions, Dependencies & Risks (Highly Recommended for Risk Management)**
-*   **9.1 Assumptions:** List statements considered true without proof.
-    *   *Example: "Third-party emission factor databases will be accessible via a stable API."*
-*   **9.2 Dependencies:** List external factors the project relies on.
-    *   *Example: "Project delivery depends on the finalization of EU CBAM implementation rules."*
+#### 7.0 范围与风险
+- **7.1 In Scope：** *只列出用户明确要求的事项（状态记录、恢复执行、token 节约）。*
+- **7.2 Out of Scope：** *若用户明确排除某能力，写出具体条目；否则写“用户未指定”。*
+- **7.3 未决 / 依赖：** *罗列原文中的疑问或缺失信息，提醒后续确认。*

@@ -7,6 +7,8 @@ use include_dir::DirEntry;
 use include_dir::include_dir;
 use walkdir::WalkDir;
 
+use crate::runtime::init as runtime_init;
+
 const DEFAULT_WORKFLOW_TOML: &str = r#"name = "commit_flow"
 
 [defaults]
@@ -44,12 +46,7 @@ pub fn init_scaffold(target_dir: &Path, templates_dir: Option<&Path>, force: boo
             .with_context(|| format!("failed to create {}", root.display()))?;
     }
 
-    // Ensure runtime directories exist even before the first run for clearer structure.
-    let runtime_root = root.join("runtime");
-    for sub in ["debug", "logs", "memory"] {
-        let dir = runtime_root.join(sub);
-        fs::create_dir_all(&dir).with_context(|| format!("failed to create {}", dir.display()))?;
-    }
+    runtime_init::ensure_runtime_tree_at(&root)?;
 
     fs::create_dir_all(&prompts_dst)
         .with_context(|| format!("failed to create {}", prompts_dst.display()))?;

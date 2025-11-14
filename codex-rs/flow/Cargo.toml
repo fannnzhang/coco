@@ -1,0 +1,29 @@
+[package]
+name = "codex-flow"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+clap_complete = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+codex-protocol = { workspace = true }
+owo-colors = { workspace = true }
+supports-color = { workspace = true }
+toml = { workspace = true }
+walkdir = { workspace = true }
+textwrap = { workspace = true }
+codex-exec = { path = "../exec" }
+include_dir = "0.7"
+chrono = { workspace = true }
+regex-lite = { workspace = true }
+ctrlc = "3.4"
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

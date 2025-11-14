@@ -38,6 +38,7 @@ members = [
     "utils/readiness",
     "utils/string",
     "utils/tokenizer",
+    "flow",
 ]
 resolver = "2"
 

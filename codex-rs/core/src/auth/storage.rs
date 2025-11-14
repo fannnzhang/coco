@@ -354,11 +354,10 @@ impl AuthStorageBackend for FileAuthStorage {
         let now = Utc::now();
 
         let mut ordered_paths: Vec<PathBuf> = Vec::new();
-        if let Some(active) = self.lock_active_auth_file().clone() {
-            if is_email_auth_candidate(&active) {
+        if let Some(active) = self.lock_active_auth_file().clone()
+            && is_email_auth_candidate(&active) {
                 ordered_paths.push(active);
             }
-        }
         for path in self.candidate_paths()? {
             if !ordered_paths.iter().any(|existing| existing == &path) {
                 ordered_paths.push(path);
@@ -423,14 +422,13 @@ impl AuthStorageBackend for FileAuthStorage {
             .as_deref()
             .is_some_and(|path| path.file_name() == Some(OsStr::new("auth.json")));
 
-        if !active_is_fallback {
-            if let Some(path) = self.infer_account_file(auth_dot_json) {
+        if !active_is_fallback
+            && let Some(path) = self.infer_account_file(auth_dot_json) {
                 self.write_json(&path, auth_dot_json)?;
                 self.mark_file_used(&path);
                 self.set_active_path(path);
                 return Ok(());
             }
-        }
 
         if let Some(path) = current_active {
             if active_is_fallback {

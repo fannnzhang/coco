@@ -21,7 +21,8 @@ use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::info;
+use tracing::warn;
 
 pub struct EditHandler;
 

@@ -167,10 +167,7 @@ struct CocoRunOutcome {
 
 #[derive(Debug)]
 enum CocoError {
-    Execution {
-        message: String,
-        log: Vec<String>,
-    },
+    Execution { message: String, log: Vec<String> },
 }
 
 #[derive(Debug, Default)]
@@ -261,13 +258,11 @@ fn parse_coco_tokens(command: &[String]) -> Option<Vec<String>> {
     if is_coco_program(&command[0]) {
         return Some(command.to_vec());
     }
-    if command.len() >= 3 && is_shell_wrapper(&command[0]) && command[1] == "-lc" {
-        if let Some(tokens) = split(&command[2]) {
-            if !tokens.is_empty() && is_coco_program(&tokens[0]) {
+    if command.len() >= 3 && is_shell_wrapper(&command[0]) && command[1] == "-lc"
+        && let Some(tokens) = split(&command[2])
+            && !tokens.is_empty() && is_coco_program(&tokens[0]) {
                 return Some(tokens);
             }
-        }
-    }
     None
 }
 
@@ -398,19 +393,17 @@ async fn collect_coco_events(
             }
             EventMsg::AgentReasoningRawContent(ev) => {
                 let trimmed = ev.text.trim_end();
-                if !trimmed.is_empty() {
-                    if let Some(line) = collector.push_line(format!("thinking: {trimmed}")) {
+                if !trimmed.is_empty()
+                    && let Some(line) = collector.push_line(format!("thinking: {trimmed}")) {
                         emit_coco_stdout_line(session, turn, call_id, &line).await;
                     }
-                }
             }
             EventMsg::AgentReasoningRawContentDelta(ev) => {
                 let trimmed = ev.delta.trim_end();
-                if !trimmed.is_empty() {
-                    if let Some(line) = collector.push_line(format!("thinking: {trimmed}")) {
+                if !trimmed.is_empty()
+                    && let Some(line) = collector.push_line(format!("thinking: {trimmed}")) {
                         emit_coco_stdout_line(session, turn, call_id, &line).await;
                     }
-                }
             }
             EventMsg::TaskStarted(_) => {
                 if !task_started_logged {
@@ -443,19 +436,17 @@ async fn collect_coco_events(
             }
             EventMsg::Warning(ev) => {
                 let trimmed = ev.message.trim_end();
-                if !trimmed.is_empty() {
-                    if let Some(line) = collector.push_line(format!("warning: {trimmed}")) {
+                if !trimmed.is_empty()
+                    && let Some(line) = collector.push_line(format!("warning: {trimmed}")) {
                         emit_coco_stdout_line(session, turn, call_id, &line).await;
                     }
-                }
             }
             EventMsg::Error(ev) => {
                 let trimmed = ev.message.trim_end().to_string();
-                if !trimmed.is_empty() {
-                    if let Some(line) = collector.push_line(format!("error: {trimmed}")) {
+                if !trimmed.is_empty()
+                    && let Some(line) = collector.push_line(format!("error: {trimmed}")) {
                         emit_coco_stdout_line(session, turn, call_id, &line).await;
                     }
-                }
                 failure_message = Some(trimmed);
                 break;
             }
@@ -463,11 +454,10 @@ async fn collect_coco_events(
                 if let Some(line) = collector.finalize_pending_agent() {
                     emit_coco_stdout_line(session, turn, call_id, &line).await;
                 }
-                if let Some(last) = ev.last_agent_message.as_deref() {
-                    if let Some(line) = collector.commit_agent_message(last) {
+                if let Some(last) = ev.last_agent_message.as_deref()
+                    && let Some(line) = collector.commit_agent_message(last) {
                         emit_coco_stdout_line(session, turn, call_id, &line).await;
                     }
-                }
                 success = true;
                 break;
             }
